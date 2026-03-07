@@ -124,11 +124,18 @@ retrieval_metrics_path:    logs/retrieval_metrics.csv
 # Phase 5 — LLM RAG Answer Generation
 # ──────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────
+# Phase 5 — LLM RAG Answer Generation
+# ──────────────────────────────────────────────────────────────
+
 llm:
-  provider:    "ollama"        # "ollama" (local) | "groq" (API)
-  model:       "llama3"        # Ollama: "llama3", "mistral" | Groq: "llama3-8b-8192"
-  temperature: 0.2             # Low temp for factual, grounded answers
-  max_tokens:  512             # Max output tokens
+  provider:    "huggingface"                  # "huggingface" (cloud), "groq" (cloud), "ollama" (local)
+  model:       "mistralai/Mistral-7B-Instruct"  # Hugging Face model ID
+  temperature: 0.2                            # Low temp for factual, grounded answers
+  max_tokens:  512                            # Max output tokens
+
+# Required: Set HF_API_KEY environment variable for Hugging Face
+# Get free API key: https://huggingface.co/settings/tokens
 
 rag_metrics_path:  logs/rag_metrics.csv
 
