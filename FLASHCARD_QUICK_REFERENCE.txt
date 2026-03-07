@@ -1,0 +1,259 @@
+╔════════════════════════════════════════════════════════════════╗
+║           PHASE 7 — FLASHCARDS QUICK REFERENCE                 ║
+╚════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────┐
+│ QUICK START                                                    │
+└────────────────────────────────────────────────────────────────┘
+
+  1. Generate flashcards:
+     $ python scripts/generate_flashcards.py
+
+  2. Study in Streamlit:
+     $ streamlit run frontend/streamlit_app.py
+     → Navigate to "🎴 Study Flashcards" tab
+
+  3. Or import to Anki:
+     → File → Import → data/flashcards/all_flashcards.txt
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ KEY COMMANDS                                                   │
+└────────────────────────────────────────────────────────────────┘
+
+  # Basic usage
+  $ python scripts/generate_flashcards.py
+
+  # With options
+  $ python scripts/generate_flashcards.py \
+      --limit 5 \
+      --max-cards 15 \
+      --formats json csv anki
+
+  # Use Groq API (faster)
+  $ python scripts/generate_flashcards.py \
+      --provider groq \
+      --model llama3-8b-8192
+
+  # Local Ollama
+  $ python scripts/generate_flashcards.py \
+      --provider ollama \
+      --model llama3
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ KEY FILES                                                      │
+└────────────────────────────────────────────────────────────────┘
+
+  Source Code:
+    src/education/flashcard_generator.py    → LLM-powered generation
+    scripts/generate_flashcards.py          → Pipeline script
+
+  Outputs:
+    data/flashcards/<lecture>_flashcards.*  → Per-lecture
+    data/flashcards/all_flashcards.*        → Combined
+
+  Documentation:
+    FLASHCARD_GUIDE.md                      → Complete guide
+    PHASE7_SUMMARY.md                       → Implementation summary
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ OUTPUT FORMATS                                                 │
+└────────────────────────────────────────────────────────────────┘
+
+  JSON (data/flashcards/*.json):
+    [{
+      "question": "What is gradient descent?",
+      "answer": "An optimization algorithm...",
+      "lecture_id": "ml_basics"
+    }]
+
+  CSV (data/flashcards/*.csv):
+    question,answer,lecture_id,topic
+    "What is...","An algorithm...","ml_basics","ML"
+
+  Anki (data/flashcards/*.txt):
+    Question text<TAB>Answer text
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ STREAMLIT UI FEATURES                                          │
+└────────────────────────────────────────────────────────────────┘
+
+  • Select flashcard set (individual lecture or all)
+  • View question
+  • Click "Show Answer" to reveal
+  • Navigate: Previous / Next
+  • Shuffle: Randomize order
+  • Reset: Return to start
+  • Progress tracker
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ PROGRAMMATIC USAGE                                             │
+└────────────────────────────────────────────────────────────────┘
+
+  from src.education.flashcard_generator import FlashcardGenerator
+
+  # Initialize
+  generator = FlashcardGenerator(
+      model_config={"provider": "ollama", "model": "llama3"},
+      max_cards_per_chunk=10,
+  )
+
+  # Generate
+  flashcards = generator.generate_flashcards(
+      text="Neural networks use backpropagation.",
+      lecture_id="nn_basics"
+  )
+
+  # Save
+  generator.save_flashcards(
+      flashcards,
+      Path("output.json"),
+      format="json"
+  )
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ IMPORT TO ANKI                                                 │
+└────────────────────────────────────────────────────────────────┘
+
+  1. Generate Anki format:
+     $ python scripts/generate_flashcards.py --formats anki
+
+  2. Open Anki desktop app
+
+  3. Import:
+     File → Import
+     Select: data/flashcards/all_flashcards.txt
+     Type: "Text separated by tabs"
+
+  4. Start studying!
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ TROUBLESHOOTING                                                │
+└────────────────────────────────────────────────────────────────┘
+
+  ❌ No flashcards generated
+  ✅ Check LLM is running (ollama) or API key set (groq)
+     Check transcripts exist in data/transcripts/
+
+  ❌ Poor quality flashcards
+  ✅ Lower temperature (0.1-0.2)
+     Try different model
+
+  ❌ LLM timeout
+  ✅ Process fewer transcripts (--limit 3)
+     Use faster provider (groq)
+
+  ❌ "No flashcards available" in UI
+  ✅ Run: python scripts/generate_flashcards.py
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ CONFIGURATION                                                  │
+└────────────────────────────────────────────────────────────────┘
+
+  Edit: config/config.yaml
+
+  llm:
+    provider: "ollama"      # or "groq"
+    model: "llama3"
+    temperature: 0.2
+
+  flashcards:
+    max_cards_per_chunk: 10
+    formats: ["json", "csv", "anki"]
+
+  flashcards_path: data/flashcards
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ COMMAND-LINE OPTIONS                                           │
+└────────────────────────────────────────────────────────────────┘
+
+  --config PATH               Config file path
+  --transcripts-dir PATH      Transcripts directory
+  --output-dir PATH           Output directory
+  --limit N                   Process only N transcripts
+  --max-cards N               Max cards per transcript
+  --formats [json csv anki]   Export formats
+  --provider {ollama|groq}    LLM provider
+  --model NAME                LLM model name
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ EXAMPLE WORKFLOWS                                              │
+└────────────────────────────────────────────────────────────────┘
+
+  # Workflow 1: Generate and study in Streamlit
+  $ python scripts/generate_flashcards.py
+  $ streamlit run frontend/streamlit_app.py
+
+  # Workflow 2: Generate and import to Anki
+  $ python scripts/generate_flashcards.py --formats anki
+  # Open Anki → Import → all_flashcards.txt
+
+  # Workflow 3: Generate for specific lectures
+  $ python scripts/generate_flashcards.py --limit 3 --max-cards 20
+
+  # Workflow 4: Use Groq for fast generation
+  $ export GROQ_API_KEY="your_key"
+  $ python scripts/generate_flashcards.py --provider groq
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ STUDY TIPS                                                     │
+└────────────────────────────────────────────────────────────────┘
+
+  1. Try to recall before showing answer
+  2. Use shuffle for varied practice
+  3. Review regularly (spaced repetition)
+  4. Import to Anki for automatic scheduling
+  5. Focus on concepts you find difficult
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ FILE LOCATIONS                                                 │
+└────────────────────────────────────────────────────────────────┘
+
+  Inputs:
+    data/transcripts/*.json        → Source transcripts
+
+  Outputs:
+    data/flashcards/lecture_*.*    → Per-lecture files
+    data/flashcards/all_*.*        → Combined files
+
+  Formats:
+    *.json  → Structured data
+    *.csv   → Spreadsheet format
+    *.txt   → Anki import format
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ PERFORMANCE                                                    │
+└────────────────────────────────────────────────────────────────┘
+
+  • Generation: ~2-5 seconds/transcript (Ollama)
+  • Generation: <1 second/transcript (Groq)
+  • Export: Instant
+  • Scales: 100+ transcripts efficiently
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ TESTING                                                        │
+└────────────────────────────────────────────────────────────────┘
+
+  # Run tests
+  $ pytest tests/test_flashcard_generator.py -v
+
+  # With coverage
+  $ pytest tests/test_flashcard_generator.py --cov=src/education
+
+
+╔════════════════════════════════════════════════════════════════╗
+║  For detailed documentation, see: FLASHCARD_GUIDE.md           ║
+╚════════════════════════════════════════════════════════════════╝

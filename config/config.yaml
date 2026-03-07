@@ -1,0 +1,171 @@
+# ============================================================
+#  Interactive Lecture Intelligence — Speech RAG System
+#  Phase 1 Configuration
+# ============================================================
+
+# ──────────────────────────────
+# Audio settings
+# ──────────────────────────────
+audio_sample_rate: 16000   # Hz required by Whisper
+audio_channels: 1          # mono
+
+# ──────────────────────────────
+# Text chunking (Phase 2 prep)
+# ──────────────────────────────
+chunk_size: 500            # tokens / words per chunk
+chunk_overlap: 50          # overlap between consecutive chunks
+
+# ──────────────────────────────
+# Dataset paths (relative to project root)
+# ──────────────────────────────
+dataset_paths:
+  tedlium:           datasets/tedlium
+  librispeech:       datasets/librispeech
+  commonvoice:       datasets/commonvoice_indian
+  local_lectures:    data/raw_audio
+
+# ──────────────────────────────
+# Output paths
+# ──────────────────────────────
+processed_audio_path:      data/processed_audio
+metadata_output_path:      data/dataset_metadata.csv
+transcripts_path:          data/transcripts
+
+# ──────────────────────────────
+# Logging
+# ──────────────────────────────
+log_path:                  logs/pipeline.log
+log_level:                 INFO
+
+# ──────────────────────────────
+# PII anonymization
+# ──────────────────────────────
+pii_entities:
+  - PERSON
+  - ORG
+  - GPE
+
+pii_replacements:
+  PERSON:   "[PERSON]"
+  ORG:      "[ORG]"
+  GPE:      "[LOCATION]"
+
+spacy_model:               en_core_web_sm
+
+# ──────────────────────────────
+# Supported audio extensions
+# ──────────────────────────────
+supported_audio_extensions:
+  - .wav
+  - .mp3
+  - .flac
+  - .ogg
+  - .m4a
+
+# ──────────────────────────────────────────────────────────────
+# Phase 2 — ASR (Whisper Transcription)
+# ──────────────────────────────────────────────────────────────
+
+# Model
+asr_model:      "whisper-large-v3"    # human-readable label
+asr_model_size: "large-v3"            # passed to whisper.load_model()
+asr_backend:    "openai"              # "openai" | "faster"
+
+# Inference
+device:         "cuda"                # "cuda" or "cpu" (auto-fallback to cpu)
+batch_size:     4                     # faster-whisper only; openai ignores this
+asr_language:   "en"                  # force language; null = auto-detect
+
+# Output paths (relative to project root)
+transcripts_path:   data/transcripts
+segments_path:      data/segments
+
+# Logging / Metrics
+asr_log_path:       logs/asr_pipeline.log
+asr_metrics_path:   logs/asr_metrics.csv
+
+# ──────────────────────────────────────────────────────────────
+# Phase 3 — Embedding & Vector Database
+# ──────────────────────────────────────────────────────────────
+
+# Embedding model
+embedding_model:       "BAAI/bge-m3"
+embedding_batch_size:  32              # texts per forward pass
+
+# Chunking
+chunk_size:            500             # max tokens per chunk
+chunk_overlap:         50              # overlap tokens between chunks
+min_chunk_tokens:      20              # discard chunks smaller than this
+
+# ChromaDB
+vector_db_path:        vector_db
+vector_collection:     lecture_index
+vector_distance:       cosine          # "cosine" or "l2"
+
+# Output paths
+chunks_path:           data/chunks
+
+# ──────────────────────────────────────────────────────────────
+# Phase 4 — Advanced Retrieval Pipeline
+# ──────────────────────────────────────────────────────────────
+
+retrieval:
+  semantic_top_k:  10       # results from ChromaDB vector search
+  bm25_top_k:      10       # results from BM25 keyword search
+  rrf_k:           60       # Reciprocal Rank Fusion constant
+  max_candidates:  20       # max candidates after RRF merge
+  final_results:   5        # final results after reranking
+
+reranker_model:            "BAAI/bge-reranker-large"
+
+retrieval_metrics_path:    logs/retrieval_metrics.csv
+
+# ──────────────────────────────────────────────────────────────
+# Phase 5 — LLM RAG Answer Generation
+# ──────────────────────────────────────────────────────────────
+
+llm:
+  provider:    "ollama"        # "ollama" (local) | "groq" (API)
+  model:       "llama3"        # Ollama: "llama3", "mistral" | Groq: "llama3-8b-8192"
+  temperature: 0.2             # Low temp for factual, grounded answers
+  max_tokens:  512             # Max output tokens
+
+rag_metrics_path:  logs/rag_metrics.csv
+
+# ──────────────────────────────────────────────────────────────
+# Phase 6 — Knowledge Graph Generation
+# ──────────────────────────────────────────────────────────────
+
+knowledge_graph:
+  spacy_model:           "en_core_web_trf"    # High-accuracy transformer model
+  min_concept_length:    3                     # Min characters for concept
+  max_concept_length:    50                    # Max characters for concept
+  min_frequency:         2                     # Min frequency to keep concept
+  min_degree:            1                     # Min connections to keep concept
+  max_distance:          10                    # Max token distance for relationships
+  max_viz_nodes:         100                   # Max nodes in visualization
+
+knowledge_graph_output_path:   data/knowledge_graph
+knowledge_graph_viz_path:      frontend/concept_graph.html
+
+# ──────────────────────────────────────────────────────────────
+# Phase 7 — Flashcard Generation
+# ──────────────────────────────────────────────────────────────
+
+flashcards:
+  max_cards_per_chunk:   10                    # Max flashcards per transcript
+  formats:               ["json", "csv", "anki"]  # Export formats
+
+flashcards_path:           data/flashcards
+
+# ──────────────────────────────────────────────────────────────
+# Phase 8 — Lecture Summarization
+# ──────────────────────────────────────────────────────────────
+
+summaries:
+  chunk_size:      2000       # Max characters per chunk for map-reduce
+  chunk_overlap:   200        # Overlap between chunks
+  max_concepts:    10         # Max key concepts to extract
+  max_definitions: 10         # Max definitions to include
+
+summaries_path:    data/summaries

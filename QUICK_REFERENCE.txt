@@ -1,0 +1,160 @@
+╔════════════════════════════════════════════════════════════════╗
+║           PHASE 6 — KNOWLEDGE GRAPH QUICK REFERENCE            ║
+╚════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────┐
+│ QUICK START                                                    │
+└────────────────────────────────────────────────────────────────┘
+
+  1. Install dependencies:
+     $ pip install spacy networkx pyvis
+     $ python -m spacy download en_core_web_trf
+
+  2. Generate graph:
+     $ python scripts/build_concept_graph.py
+
+  3. View visualization:
+     $ open frontend/concept_graph.html
+     OR
+     $ streamlit run frontend/streamlit_app.py
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ KEY COMMANDS                                                   │
+└────────────────────────────────────────────────────────────────┘
+
+  # One-liner setup
+  $ ./quick_start_kg.sh
+
+  # With options
+  $ python scripts/build_concept_graph.py --limit 10 --max-viz-nodes 200
+
+  # Generate sample data
+  $ python scripts/create_sample_transcripts.py
+
+  # Run tests
+  $ pytest tests/test_concept_extractor.py tests/test_graph_builder.py -v
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ KEY FILES                                                      │
+└────────────────────────────────────────────────────────────────┘
+
+  Source Code:
+    src/knowledge_graph/concept_extractor.py  → Concept extraction
+    src/knowledge_graph/graph_builder.py      → Graph construction
+    scripts/build_concept_graph.py            → Pipeline script
+
+  Outputs:
+    data/knowledge_graph/concept_graph.json   → Graph data
+    frontend/concept_graph.html               → Visualization
+
+  Documentation:
+    KNOWLEDGE_GRAPH_GUIDE.md                  → Full guide
+    PHASE6_SUMMARY.md                         → Implementation summary
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ PROGRAMMATIC USAGE                                             │
+└────────────────────────────────────────────────────────────────┘
+
+  from src.knowledge_graph.concept_extractor import ConceptExtractor
+  from src.knowledge_graph.graph_builder import GraphBuilder
+
+  # Extract concepts
+  extractor = ConceptExtractor()
+  concepts = extractor.extract_concepts("Text here")
+
+  # Build graph
+  builder = GraphBuilder()
+  builder.build_from_transcripts(Path("data/transcripts"), extractor)
+  builder.visualize(Path("frontend/concept_graph.html"))
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ API ENDPOINTS                                                  │
+└────────────────────────────────────────────────────────────────┘
+
+  GET  /knowledge_graph        → Get graph JSON data
+
+  Example:
+    $ curl http://localhost:8000/knowledge_graph
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ TROUBLESHOOTING                                                │
+└────────────────────────────────────────────────────────────────┘
+
+  ❌ "Model not found"
+  ✅ python -m spacy download en_core_web_trf
+
+  ❌ "No transcripts found"
+  ✅ python scripts/create_sample_transcripts.py
+     OR
+     python scripts/run_phase2_asr.py
+
+  ❌ "Graph not generated" in UI
+  ✅ python scripts/build_concept_graph.py
+
+  ❌ Too many/few concepts
+  ✅ Adjust --min-frequency and --max-viz-nodes
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ CONFIGURATION                                                  │
+└────────────────────────────────────────────────────────────────┘
+
+  Edit: config/config.yaml
+
+  knowledge_graph:
+    spacy_model: "en_core_web_trf"     # Transformer model
+    min_frequency: 2                    # Prune threshold
+    max_viz_nodes: 100                  # Visualization limit
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ VISUALIZATION TIPS                                             │
+└────────────────────────────────────────────────────────────────┘
+
+  • Hover over nodes → See details
+  • Click & drag → Rearrange layout
+  • Mouse wheel → Zoom in/out
+  • Navigation controls → Bottom right
+
+  Node Colors:
+    🔴 Red   → Highly connected (>5 edges)
+    🟢 Teal  → Moderately connected (>2 edges)
+    ⚪ Gray  → Sparsely connected
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ TYPICAL WORKFLOW                                               │
+└────────────────────────────────────────────────────────────────┘
+
+  1. Run Phase 2 (if needed):
+     $ python scripts/run_phase2_asr.py
+
+  2. Build knowledge graph:
+     $ python scripts/build_concept_graph.py
+
+  3. View in Streamlit:
+     $ streamlit run frontend/streamlit_app.py
+     → Click "🔍 Explore Concept Graph"
+
+  4. Or open directly:
+     $ open frontend/concept_graph.html
+
+
+┌────────────────────────────────────────────────────────────────┐
+│ PERFORMANCE                                                    │
+└────────────────────────────────────────────────────────────────┘
+
+  • Processing: ~1-5 seconds/transcript
+  • Model load: ~5-10 seconds (one-time)
+  • Memory: ~1-2GB (transformer model)
+  • Scales to 100+ transcripts
+
+
+╔════════════════════════════════════════════════════════════════╗
+║  For detailed documentation, see: KNOWLEDGE_GRAPH_GUIDE.md     ║
+╚════════════════════════════════════════════════════════════════╝

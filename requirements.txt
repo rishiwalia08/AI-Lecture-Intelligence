@@ -1,0 +1,35 @@
+torch>=2.1.0
+transformers>=4.38.0
+librosa>=0.10.1
+pydub>=0.25.1
+soundfile>=0.12.1
+pandas>=2.1.0
+tqdm>=4.66.0
+spacy>=3.7.0
+pyyaml>=6.0.1
+numpy>=1.26.0
+
+# Phase 2 — ASR
+openai-whisper>=20231117
+faster-whisper>=1.0.0
+
+# Phase 3 — Embedding & Vector DB
+sentence-transformers>=2.7.0
+chromadb>=0.5.0
+
+# Phase 4 — Retrieval Pipeline
+rank-bm25>=0.2.2
+
+# Phase 5 — LLM RAG Answer Generation
+groq>=0.8.0
+pydantic>=2.0.0
+ragas>=0.1.0
+
+# Phase 6 — Knowledge Graph Generation
+spacy>=3.7.0
+networkx>=3.1
+pyvis>=0.3.2
+
+# Dev / test only
+pytest>=7.4.0
+pytest-cov>=4.1.0
