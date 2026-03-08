@@ -17,3 +17,5 @@ models/
 *.mp4
 *.wav
 *.json
+!frontend/package.json
+!frontend/package-lock.json
