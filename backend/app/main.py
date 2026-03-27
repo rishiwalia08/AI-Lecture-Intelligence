@@ -15,6 +15,7 @@ Start the server
 from __future__ import annotations
 
 import sys
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -38,14 +39,20 @@ logger = get_logger(__name__)
 # ──────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Initialise the RAG pipeline once on server startup."""
+    """Kick off RAG initialisation without blocking server startup."""
     logger.info("🚀 Starting Interactive Lecture Intelligence API…")
     bridge = get_rag_bridge()
-    bridge.initialise()          # blocks until RAGService + BM25 index ready
-    if bridge.ready:
-        logger.info("✅ RAG pipeline ready.")
-    else:
-        logger.error("❌ RAG pipeline failed to initialise: %s", bridge.error)
+
+    def _initialise_rag() -> None:
+        bridge.initialise()  # heavy load in background
+        if bridge.ready:
+            logger.info("✅ RAG pipeline ready.")
+        else:
+            logger.error("❌ RAG pipeline failed to initialise: %s", bridge.error)
+
+    threading.Thread(target=_initialise_rag, daemon=True).start()
+    logger.info("RAG pipeline initialisation started in background.")
+
     yield
     logger.info("🛑 Shutting down API.")
 
@@ -84,6 +91,11 @@ app.include_router(router)
 @app.get("/", include_in_schema=False)
 async def root():
     return JSONResponse({"message": "Interactive Lecture Intelligence API — see /docs"})
+
+
+@app.head("/", include_in_schema=False)
+async def root_head():
+    return JSONResponse(status_code=200, content={})
 
 
 # ── Dev runner ────────────────────────────────────────────────
