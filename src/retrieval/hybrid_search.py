@@ -97,8 +97,22 @@ class BM25Index:
                 }
             else:
                 d = dict(c)
+            tokens = self._tokenizer(d["text"])
+            # Skip empty documents — BM25 can fail when average document
+            # length is zero across the corpus.
+            if not tokens:
+                continue
+
             self._chunks.append(d)
-            tokenized.append(self._tokenizer(d["text"]))
+            tokenized.append(tokens)
+
+        if not tokenized:
+            self._bm25 = None
+            logger.warning(
+                "BM25 index not built: no non-empty chunks available. "
+                "Run indexing first (Phase 3) to enable retrieval."
+            )
+            return
 
         self._bm25 = BM25Okapi(tokenized)
         logger.info("BM25 index built: %d documents.", len(self._chunks))
