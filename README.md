@@ -55,7 +55,7 @@ Hybrid Retrieval + Reranking
       ↓
 LLM Answer Generation (Llama 3)
       ↓
-Interactive Interface (Streamlit)
+Interactive Interface (React Dashboard)
 ```
 
 Additional modules:
@@ -95,8 +95,9 @@ Lecture Summarization
 
 ## Frontend
 
-* Streamlit
-* PyVis (Graph Visualization)
+* React + Vite
+* TailwindCSS + Framer Motion
+* D3.js + Recharts
 
 ---
 
@@ -141,7 +142,9 @@ speech_rag/
 │   └── build_concept_graph.py
 │
 ├── frontend/
-│   └── streamlit_app.py
+│   ├── package.json
+│   ├── vite.config.js
+│   └── src/
 │
 ├── backend/
 │
@@ -237,10 +240,18 @@ Start backend:
 uvicorn backend.app.main:app --reload
 ```
 
-Run Streamlit UI:
+Run React frontend:
 
 ```
-streamlit run frontend/streamlit_app.py
+cd frontend
+npm install
+npm run dev
+```
+
+Set frontend API URL in `frontend/.env` if needed:
+
+```
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ---
@@ -370,6 +381,12 @@ Phase 8 — Lecture summarization
 • Multi-course search
 • Slide extraction from videos
 • Personalized study recommendations
+
+---
+
+# Documentation Note
+
+All previous phase-wise markdown guides/checklists were consolidated into this single README.
 
 ---
 
