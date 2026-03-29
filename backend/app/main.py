@@ -24,6 +24,8 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_PROJECT_ROOT))
@@ -87,15 +89,38 @@ app.add_middleware(
 app.include_router(router)
 
 
-# ── Root redirect ─────────────────────────────────────────────
-@app.get("/", include_in_schema=False)
-async def root():
-    return JSONResponse({"message": "Interactive Lecture Intelligence API — see /docs"})
+# ── Frontend (single-service mode) ───────────────────────────
+_FRONTEND_DIST = _PROJECT_ROOT / "frontend" / "dist"
+_FRONTEND_ASSETS = _FRONTEND_DIST / "assets"
 
+if _FRONTEND_DIST.exists():
+    if _FRONTEND_ASSETS.exists():
+        app.mount("/assets", StaticFiles(directory=str(_FRONTEND_ASSETS)), name="assets")
 
-@app.head("/", include_in_schema=False)
-async def root_head():
-    return JSONResponse(status_code=200, content={})
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return FileResponse(_FRONTEND_DIST / "index.html")
+
+    @app.head("/", include_in_schema=False)
+    async def root_head():
+        return JSONResponse(status_code=200, content={})
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        candidate = _FRONTEND_DIST / full_path
+        if full_path and candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_FRONTEND_DIST / "index.html")
+
+else:
+    # ── Root fallback (API-only mode) ─────────────────────────────
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return JSONResponse({"message": "Interactive Lecture Intelligence API — see /docs"})
+
+    @app.head("/", include_in_schema=False)
+    async def root_head():
+        return JSONResponse(status_code=200, content={})
 
 
 # ── Dev runner ────────────────────────────────────────────────
