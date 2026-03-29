@@ -41,20 +41,9 @@ logger = get_logger(__name__)
 # ──────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Kick off RAG initialisation without blocking server startup."""
+    """Minimal startup - RAG loads on first request, not at startup."""
     logger.info("🚀 Starting Interactive Lecture Intelligence API…")
-    bridge = get_rag_bridge()
-
-    def _initialise_rag() -> None:
-        bridge.initialise()  # heavy load in background
-        if bridge.ready:
-            logger.info("✅ RAG pipeline ready.")
-        else:
-            logger.error("❌ RAG pipeline failed to initialise: %s", bridge.error)
-
-    threading.Thread(target=_initialise_rag, daemon=True).start()
-    logger.info("RAG pipeline initialisation started in background.")
-
+    logger.info("ℹ️  RAG pipeline will initialize on first request (lazy loading).")
     yield
     logger.info("🛑 Shutting down API.")
 

@@ -83,10 +83,16 @@ async def ask(req: QueryRequest) -> AnswerResponse:
     - Generates a grounded answer with the configured LLM.
     """
     bridge = get_rag_bridge()
+    
+    # Lazy initialization on first request
+    if not bridge.ready and bridge.error is None:
+        logger.info("/ask: initializing RAG on first request...")
+        bridge.initialise()
+    
     if not bridge.ready:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"RAG pipeline not ready. {bridge.error or 'Please wait for startup.'}",
+            detail=f"RAG pipeline not ready. {bridge.error or 'Initializing, please retry.'}",
         )
 
     logger.info("/ask: query='%s'", req.query[:100])
