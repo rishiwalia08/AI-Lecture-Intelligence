@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
+import base64
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -228,7 +230,29 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import]
 
-        transcript_items = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+        transcript_items: List[Dict[str, Any]] = []
+
+        # Try direct convenience API first
+        try:
+            transcript_items = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"])
+        except Exception:
+            # Fallback to explicit transcript selection (manual/generated/translated)
+            transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+            selected = None
+            try:
+                selected = transcripts.find_transcript(["en", "en-US", "en-GB"])
+            except Exception:
+                try:
+                    selected = transcripts.find_generated_transcript(["en", "en-US", "en-GB"])
+                except Exception:
+                    selected = None
+
+            if selected is not None:
+                try:
+                    transcript_items = selected.fetch()
+                except Exception:
+                    transcript_items = []
+
         segments = []
         for item in transcript_items:
             text = str(item.get("text", "")).strip()
@@ -268,7 +292,29 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        },
     }
+
+    # Optional cookie support for bot-protected videos in cloud deploys.
+    # Set one of:
+    # - YTDLP_COOKIES_PATH=/path/to/cookies.txt
+    # - YTDLP_COOKIES_B64=<base64-of-cookies.txt>
+    cookies_path = os.getenv("YTDLP_COOKIES_PATH", "").strip()
+    cookies_b64 = os.getenv("YTDLP_COOKIES_B64", "").strip()
+    temp_cookie_file: Optional[Path] = None
+
+    if cookies_path:
+        ydl_opts["cookiefile"] = cookies_path
+    elif cookies_b64:
+        try:
+            decoded = base64.b64decode(cookies_b64.encode("utf-8"))
+            temp_cookie_file = tmp_dir / "cookies.txt"
+            temp_cookie_file.write_bytes(decoded)
+            ydl_opts["cookiefile"] = str(temp_cookie_file)
+        except Exception:
+            temp_cookie_file = None
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -277,8 +323,14 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
             "YouTube download blocked by anti-bot protection for this video. "
-            "Please use upload ingest, or a video with public transcript."
+            "Use upload ingest, use a video with public transcript, or configure YTDLP_COOKIES_PATH / YTDLP_COOKIES_B64 on Render."
         ) from exc
+    finally:
+        try:
+            if temp_cookie_file and temp_cookie_file.exists():
+                temp_cookie_file.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     media_path = Path(downloaded)
     title = str(info.get("title", "youtube_lecture"))
