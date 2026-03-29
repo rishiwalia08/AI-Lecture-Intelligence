@@ -202,7 +202,7 @@ function ChatPage() {
               onSend()
             }
           }}
-          placeholder="Ask about gradient descent, transformers, backprop..."
+          placeholder="Ask a question about your ingested lecture..."
           className="w-full rounded-xl border border-slate-600 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none ring-indigo-400/60 placeholder:text-slate-400 focus:ring"
         />
         <button

@@ -31,6 +31,7 @@ groq>=0.8.0                    # Alternative cloud provider
 pydantic>=2.0.0
 ragas>=0.1.0
 yt-dlp>=2025.1.26
+youtube-transcript-api>=0.6.2
 
 # Phase 6 — Knowledge Graph Generation
 spacy>=3.7.0

@@ -94,13 +94,38 @@ def _ensure_bridge_ready() -> Any:
     return bridge
 
 
-def ingest_local_media(file_path: Path, lecture_id: Optional[str] = None, source_url: Optional[str] = None) -> Dict[str, Any]:
-    """Transcribe media, chunk it, embed it, and index into vector DB."""
-    if not file_path.exists():
-        raise FileNotFoundError(f"Media file not found: {file_path}")
+def _parse_youtube_video_id(url: str) -> Optional[str]:
+    """Extract YouTube video id from common URL formats."""
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
 
+    if "youtu.be" in host:
+        vid = parsed.path.strip("/")
+        return vid or None
+
+    if "youtube.com" in host:
+        if parsed.path == "/watch":
+            vid = parse_qs(parsed.query).get("v", [None])[0]
+            return vid
+        if parsed.path.startswith("/shorts/"):
+            parts = parsed.path.split("/")
+            return parts[2] if len(parts) > 2 else None
+        if parsed.path.startswith("/embed/"):
+            parts = parsed.path.split("/")
+            return parts[2] if len(parts) > 2 else None
+
+    return None
+
+
+def _index_transcript_segments(
+    segments: List[Dict[str, Any]],
+    lecture_id: str,
+    source_url: Optional[str] = None,
+    audio_path: str = "",
+) -> Dict[str, Any]:
+    """Persist transcript, chunk it, index embeddings, and refresh BM25."""
     bridge = _ensure_bridge_ready()
-    retrieval = bridge._svc._retrieval  # existing initialized retrieval components
+    retrieval = bridge._svc._retrieval
 
     cfg = _load_config()
     chunk_cfg = ChunkConfig(
@@ -108,6 +133,52 @@ def ingest_local_media(file_path: Path, lecture_id: Optional[str] = None, source
         chunk_overlap=int(cfg.get("chunk_overlap", 50)),
         min_chunk_tokens=int(cfg.get("min_chunk_tokens", 20)),
     )
+
+    transcript = format_transcript(
+        lecture_id=lecture_id,
+        segments=segments,
+        metadata={
+            "source_url": source_url or "",
+            "audio_path": audio_path,
+        },
+    )
+
+    transcripts_dir = _PROJECT_ROOT / cfg.get("transcripts_path", "data/transcripts")
+    segments_dir = _PROJECT_ROOT / cfg.get("segments_path", "data/segments")
+    chunks_dir = _PROJECT_ROOT / cfg.get("chunks_path", "data/chunks")
+
+    save_full_transcript(transcript, transcripts_dir)
+    save_segments(transcript, segments_dir)
+
+    chunks = create_chunks(transcript, chunk_cfg)
+    save_chunks(chunks, chunks_dir)
+
+    embeddings = retrieval._embedder.embed_chunks(chunks)
+    metadatas = build_metadata_list(chunks)
+    indexed = retrieval._manager.upsert(chunks, embeddings, metadatas)
+    retrieval.build_bm25_index()
+
+    if source_url:
+        source_map = _load_source_map()
+        source_map[lecture_id] = source_url
+        _save_source_map(source_map)
+
+    return {
+        "lecture_id": lecture_id,
+        "num_segments": len(segments),
+        "num_chunks": len(chunks),
+        "indexed_vectors": indexed,
+        "duration_s": float(transcript.get("total_duration", 0.0)),
+        "message": "Ingestion complete.",
+    }
+
+
+def ingest_local_media(file_path: Path, lecture_id: Optional[str] = None, source_url: Optional[str] = None) -> Dict[str, Any]:
+    """Transcribe media, chunk it, embed it, and index into vector DB."""
+    if not file_path.exists():
+        raise FileNotFoundError(f"Media file not found: {file_path}")
+
+    cfg = _load_config()
 
     try:
         import whisper  # type: ignore[import]
@@ -139,51 +210,54 @@ def ingest_local_media(file_path: Path, lecture_id: Optional[str] = None, source
     else:
         lecture_id = _slugify(file_path.stem)
 
-    transcript = format_transcript(
-        lecture_id=lecture_id,
+    return _index_transcript_segments(
         segments=segments,
-        metadata={
-            "source_url": source_url or "",
-            "audio_path": str(file_path),
-        },
+        lecture_id=lecture_id,
+        source_url=source_url,
+        audio_path=str(file_path),
     )
-
-    transcripts_dir = _PROJECT_ROOT / cfg.get("transcripts_path", "data/transcripts")
-    segments_dir = _PROJECT_ROOT / cfg.get("segments_path", "data/segments")
-    chunks_dir = _PROJECT_ROOT / cfg.get("chunks_path", "data/chunks")
-
-    save_full_transcript(transcript, transcripts_dir)
-    save_segments(transcript, segments_dir)
-
-    chunks = create_chunks(transcript, chunk_cfg)
-    save_chunks(chunks, chunks_dir)
-
-    embeddings = retrieval._embedder.embed_chunks(chunks)
-    metadatas = build_metadata_list(chunks)
-    indexed = retrieval._manager.upsert(chunks, embeddings, metadatas)
-    retrieval.build_bm25_index()  # refresh BM25 with new chunks
-
-    if source_url:
-        source_map = _load_source_map()
-        source_map[lecture_id] = source_url
-        _save_source_map(source_map)
-
-    return {
-        "lecture_id": lecture_id,
-        "num_segments": len(segments),
-        "num_chunks": len(chunks),
-        "indexed_vectors": indexed,
-        "duration_s": float(transcript.get("total_duration", 0.0)),
-        "message": "Ingestion complete.",
-    }
 
 
 def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]:
-    """Download YouTube audio then ingest it."""
+    """Ingest YouTube using transcript API first, then yt-dlp audio fallback."""
+    video_id = _parse_youtube_video_id(url)
+    if not video_id:
+        raise RuntimeError("Invalid YouTube URL: could not parse video ID.")
+
+    # Preferred path: transcript API (avoids YouTube bot-check download issues)
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import]
+
+        transcript_items = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+        segments = []
+        for item in transcript_items:
+            text = str(item.get("text", "")).strip()
+            start = float(item.get("start", 0.0))
+            duration = float(item.get("duration", 0.0))
+            end = start + max(duration, 0.0)
+            if text:
+                segments.append({"text": text, "start": start, "end": end})
+
+        if segments:
+            resolved_lecture_id = _slugify(lecture_id or f"yt_{video_id}")
+            logger.info("YouTube transcript API succeeded for video_id=%s", video_id)
+            return _index_transcript_segments(
+                segments=segments,
+                lecture_id=resolved_lecture_id,
+                source_url=url,
+                audio_path="",
+            )
+    except Exception as transcript_exc:  # noqa: BLE001
+        logger.warning("YouTube transcript API failed for %s: %s", video_id, transcript_exc)
+
+    # Fallback path: download audio then transcribe
     try:
         import yt_dlp  # type: ignore[import]
     except ImportError as exc:
-        raise RuntimeError("yt-dlp is required for YouTube ingestion.") from exc
+        raise RuntimeError(
+            "Could not fetch YouTube transcript and yt-dlp is unavailable for fallback. "
+            "Install yt-dlp or use direct file upload ingest."
+        ) from exc
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="yt_ingest_"))
     out_template = str(tmp_dir / "%(id)s.%(ext)s")
@@ -196,9 +270,15 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
         "no_warnings": True,
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        downloaded = ydl.prepare_filename(info)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            downloaded = ydl.prepare_filename(info)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "YouTube download blocked by anti-bot protection for this video. "
+            "Please use upload ingest, or a video with public transcript."
+        ) from exc
 
     media_path = Path(downloaded)
     title = str(info.get("title", "youtube_lecture"))

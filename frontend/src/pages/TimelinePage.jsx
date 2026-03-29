@@ -4,10 +4,10 @@ import 'react-vertical-timeline-component/style.min.css'
 import PageTitle from '../components/PageTitle'
 
 const timelineData = [
-  { time: '00:00', title: 'Introduction', description: 'Lecture objectives and motivation.' },
-  { time: '05:14', title: 'Gradient Descent', description: 'Optimization intuition with learning rate effects.' },
-  { time: '18:30', title: 'Backpropagation', description: 'Chain rule and gradient flow in deep networks.' },
-  { time: '32:10', title: 'CNN', description: 'Convolutional filters, pooling, and spatial features.' },
+  { time: '00:00', title: 'Lecture Start', description: 'Upload or ingest a lecture to generate real timeline topics.' },
+  { time: '08:00', title: 'Topic Segment', description: 'Detected topics will appear with timestamps after ingestion.' },
+  { time: '16:00', title: 'Examples', description: 'Ask questions in chat to jump to relevant moments in the video.' },
+  { time: '24:00', title: 'Summary', description: 'Use the summaries page for concise lecture notes.' },
 ]
 
 function TimelinePage() {
