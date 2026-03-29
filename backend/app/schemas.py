@@ -45,6 +45,7 @@ class SourceItem(BaseModel):
     start_time:  float = Field(0.0, description="Start time in seconds.")
     end_time:    float = Field(0.0, description="End time in seconds.")
     chunk_id:    str   = Field("",  description="Internal chunk ID.")
+    video_url:   Optional[str] = Field(None, description="Playable video URL at source timestamp when available.")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -89,3 +90,29 @@ class HealthResponse(BaseModel):
     version:   str  = "1.0.0"
     rag_ready: bool = False
     message:   str  = ""
+
+
+class IngestYoutubeRequest(BaseModel):
+    """Body for POST /ingest_youtube."""
+    url: str = Field(..., min_length=8, max_length=2000, description="YouTube video URL")
+    lecture_id: Optional[str] = Field(None, description="Optional custom lecture_id")
+
+
+class IngestResponse(BaseModel):
+    """Response after ingesting a video/audio source."""
+    lecture_id: str
+    num_segments: int
+    num_chunks: int
+    indexed_vectors: int
+    duration_s: float
+    message: str
+
+
+class LectureSummaryItem(BaseModel):
+    lecture_id: str
+    key_topics: List[str] = Field(default_factory=list)
+    summary: str
+
+
+class SummariesResponse(BaseModel):
+    lectures: List[LectureSummaryItem] = Field(default_factory=list)

@@ -15,7 +15,6 @@ Start the server
 from __future__ import annotations
 
 import sys
-import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator

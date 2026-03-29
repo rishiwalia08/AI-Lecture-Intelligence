@@ -14,6 +14,7 @@ GET  /knowledge_graph   Get knowledge graph data.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
@@ -21,10 +22,14 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, s
 from backend.app.schemas import (
     AnswerResponse,
     HealthResponse,
+    IngestResponse,
+    IngestYoutubeRequest,
+    SummariesResponse,
     QueryRequest,
     SourceItem,
     SpeechQueryResponse,
 )
+from backend.services.ingestion_service import attach_video_urls, get_summaries, ingest_local_media, ingest_youtube
 from backend.services.rag_bridge import get_rag_bridge
 from backend.services.speech_bridge import transcribe_upload
 from src.utils.logger import get_logger
@@ -41,6 +46,11 @@ _AUDIO_TYPES = {
     "audio/mp4", "audio/m4a",
     "application/octet-stream",   # some clients send this for audio
 }
+
+
+def _ensure_bridge_ready(bridge) -> None:
+    if not bridge.ready and bridge.error is None:
+        bridge.initialise()
 
 
 # ──────────────────────────────────────────────────────────────
@@ -83,12 +93,9 @@ async def ask(req: QueryRequest) -> AnswerResponse:
     - Generates a grounded answer with the configured LLM.
     """
     bridge = get_rag_bridge()
+    _ensure_bridge_ready(bridge)
     
     # Lazy initialization on first request
-    if not bridge.ready and bridge.error is None:
-        logger.info("/ask: initializing RAG on first request...")
-        bridge.initialise()
-    
     if not bridge.ready:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -113,7 +120,8 @@ async def ask(req: QueryRequest) -> AnswerResponse:
         ) from exc
 
     elapsed = round(time.perf_counter() - t0, 3)
-    sources = [SourceItem(**s) for s in result.get("sources", [])]
+    sources_with_urls = attach_video_urls(result.get("sources", []))
+    sources = [SourceItem(**s) for s in sources_with_urls]
     return AnswerResponse(
         answer=result.get("answer", ""),
         sources=sources,
@@ -143,6 +151,7 @@ async def speech_query(
     returned alongside the answer so the frontend can display it.
     """
     bridge = get_rag_bridge()
+    _ensure_bridge_ready(bridge)
     if not bridge.ready:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -183,7 +192,8 @@ async def speech_query(
         ) from exc
 
     elapsed = round(time.perf_counter() - t0, 3)
-    sources = [SourceItem(**s) for s in result.get("sources", [])]
+    sources_with_urls = attach_video_urls(result.get("sources", []))
+    sources = [SourceItem(**s) for s in sources_with_urls]
     return SpeechQueryResponse(
         transcribed_query=transcribed_query,
         answer=result.get("answer", ""),
@@ -191,6 +201,74 @@ async def speech_query(
         query_time_s=elapsed,
         grounded=True,
     )
+
+
+@router.post(
+    "/ingest_youtube",
+    response_model=IngestResponse,
+    tags=["ingestion"],
+    summary="Ingest a YouTube lecture URL into transcripts + vector index.",
+)
+async def ingest_youtube_route(req: IngestYoutubeRequest) -> IngestResponse:
+    try:
+        payload = ingest_youtube(req.url, lecture_id=req.lecture_id)
+        return IngestResponse(**payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/ingest_youtube error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"YouTube ingestion failed: {exc}",
+        ) from exc
+
+
+@router.post(
+    "/ingest_video",
+    response_model=IngestResponse,
+    tags=["ingestion"],
+    summary="Upload a local video/audio file and ingest it.",
+)
+async def ingest_video_route(
+    media: UploadFile = File(..., description="Video/audio file such as mp4, mp3, wav, m4a"),
+    lecture_id: Optional[str] = Form(None),
+) -> IngestResponse:
+    try:
+        data = await media.read()
+        suffix = Path(media.filename or "upload.mp4").suffix or ".mp4"
+        tmp_path = Path("tmp") / f"upload_{int(time.time())}{suffix}"
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_bytes(data)
+
+        payload = ingest_local_media(tmp_path, lecture_id=lecture_id)
+        return IngestResponse(**payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/ingest_video error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Video ingestion failed: {exc}",
+        ) from exc
+    finally:
+        try:
+            if 'tmp_path' in locals() and tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+@router.get(
+    "/summaries",
+    response_model=SummariesResponse,
+    tags=["content"],
+    summary="Return lecture summaries generated from transcript content.",
+)
+async def summaries_route() -> SummariesResponse:
+    try:
+        return SummariesResponse(**get_summaries())
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/summaries error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load summaries: {exc}",
+        ) from exc
 
 
 # ──────────────────────────────────────────────────────────────

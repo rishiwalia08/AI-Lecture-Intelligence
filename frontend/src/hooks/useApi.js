@@ -26,3 +26,19 @@ export function useAsk() {
       }),
   })
 }
+
+export function useIngestYoutube() {
+  return useMutation({
+    mutationFn: ({ url, lectureId }) =>
+      api.ingestYoutube({
+        url,
+        lecture_id: lectureId || null,
+      }),
+  })
+}
+
+export function useIngestVideo() {
+  return useMutation({
+    mutationFn: ({ file, lectureId }) => api.ingestVideo(file, lectureId),
+  })
+}

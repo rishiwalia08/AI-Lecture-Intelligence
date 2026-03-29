@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+import json
+import re
+import tempfile
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+import yaml
+
+from backend.services.rag_bridge import get_rag_bridge
+from src.asr.timestamp_formatter import format_transcript, save_full_transcript, save_segments
+from src.embedding.chunking import ChunkConfig, create_chunks, save_chunks
+from src.retrieval.metadata_builder import build_metadata_list
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_CONFIG_PATH = _PROJECT_ROOT / "config" / "config.yaml"
+
+_SOURCE_MAP_PATH = _PROJECT_ROOT / "data" / "lecture_sources.json"
+
+
+def _load_config() -> Dict[str, Any]:
+    if not _CONFIG_PATH.exists():
+        return {}
+    with _CONFIG_PATH.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _slugify(value: str) -> str:
+    value = value.strip().lower()
+    value = re.sub(r"[^a-z0-9]+", "_", value)
+    return value.strip("_") or "lecture"
+
+
+def _load_source_map() -> Dict[str, str]:
+    if not _SOURCE_MAP_PATH.exists():
+        return {}
+    try:
+        with _SOURCE_MAP_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_source_map(data: Dict[str, str]) -> None:
+    _SOURCE_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _SOURCE_MAP_PATH.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def attach_video_urls(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    source_map = _load_source_map()
+    output: List[Dict[str, Any]] = []
+    for src in sources:
+        entry = dict(src)
+        lecture_id = str(src.get("lecture_id", ""))
+        base_url = source_map.get(lecture_id)
+        if base_url:
+            entry["video_url"] = build_timestamp_url(base_url, float(src.get("start_time", 0.0)))
+        output.append(entry)
+    return output
+
+
+def build_timestamp_url(url: str, start_time_s: float) -> str:
+    seconds = max(0, int(start_time_s))
+    parsed = urlparse(url)
+
+    if "youtube.com" in parsed.netloc or "youtu.be" in parsed.netloc:
+        if "youtu.be" in parsed.netloc:
+            video_id = parsed.path.strip("/")
+            return f"https://www.youtube.com/watch?v={video_id}&t={seconds}s"
+
+        qs = parse_qs(parsed.query)
+        qs["t"] = [f"{seconds}s"]
+        new_query = urlencode(qs, doseq=True)
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}t={seconds}"
+
+
+def _ensure_bridge_ready() -> Any:
+    bridge = get_rag_bridge()
+    if not bridge.ready:
+        bridge.initialise()
+    if not bridge.ready or bridge._svc is None:
+        raise RuntimeError(f"RAG pipeline could not initialize: {bridge.error or 'unknown'}")
+    return bridge
+
+
+def ingest_local_media(file_path: Path, lecture_id: Optional[str] = None, source_url: Optional[str] = None) -> Dict[str, Any]:
+    """Transcribe media, chunk it, embed it, and index into vector DB."""
+    if not file_path.exists():
+        raise FileNotFoundError(f"Media file not found: {file_path}")
+
+    bridge = _ensure_bridge_ready()
+    retrieval = bridge._svc._retrieval  # existing initialized retrieval components
+
+    cfg = _load_config()
+    chunk_cfg = ChunkConfig(
+        chunk_size=int(cfg.get("chunk_size", 500)),
+        chunk_overlap=int(cfg.get("chunk_overlap", 50)),
+        min_chunk_tokens=int(cfg.get("min_chunk_tokens", 20)),
+    )
+
+    try:
+        import whisper  # type: ignore[import]
+    except ImportError as exc:
+        raise RuntimeError("openai-whisper is required for media ingest.") from exc
+
+    asr_model_size = str(cfg.get("asr_model_size", "base"))
+    asr_language = cfg.get("asr_language", "en")
+
+    logger.info("Ingesting media '%s' with Whisper model=%s", file_path.name, asr_model_size)
+    model = whisper.load_model(asr_model_size)
+    result = model.transcribe(str(file_path), language=asr_language)
+
+    raw_segments = result.get("segments", [])
+    segments = [
+        {
+            "text": str(s.get("text", "")).strip(),
+            "start": float(s.get("start", 0.0)),
+            "end": float(s.get("end", 0.0)),
+        }
+        for s in raw_segments
+        if str(s.get("text", "")).strip()
+    ]
+    if not segments:
+        raise RuntimeError("No segments produced from media transcription.")
+
+    if lecture_id:
+        lecture_id = _slugify(lecture_id)
+    else:
+        lecture_id = _slugify(file_path.stem)
+
+    transcript = format_transcript(
+        lecture_id=lecture_id,
+        segments=segments,
+        metadata={
+            "source_url": source_url or "",
+            "audio_path": str(file_path),
+        },
+    )
+
+    transcripts_dir = _PROJECT_ROOT / cfg.get("transcripts_path", "data/transcripts")
+    segments_dir = _PROJECT_ROOT / cfg.get("segments_path", "data/segments")
+    chunks_dir = _PROJECT_ROOT / cfg.get("chunks_path", "data/chunks")
+
+    save_full_transcript(transcript, transcripts_dir)
+    save_segments(transcript, segments_dir)
+
+    chunks = create_chunks(transcript, chunk_cfg)
+    save_chunks(chunks, chunks_dir)
+
+    embeddings = retrieval._embedder.embed_chunks(chunks)
+    metadatas = build_metadata_list(chunks)
+    indexed = retrieval._manager.upsert(chunks, embeddings, metadatas)
+    retrieval.build_bm25_index()  # refresh BM25 with new chunks
+
+    if source_url:
+        source_map = _load_source_map()
+        source_map[lecture_id] = source_url
+        _save_source_map(source_map)
+
+    return {
+        "lecture_id": lecture_id,
+        "num_segments": len(segments),
+        "num_chunks": len(chunks),
+        "indexed_vectors": indexed,
+        "duration_s": float(transcript.get("total_duration", 0.0)),
+        "message": "Ingestion complete.",
+    }
+
+
+def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]:
+    """Download YouTube audio then ingest it."""
+    try:
+        import yt_dlp  # type: ignore[import]
+    except ImportError as exc:
+        raise RuntimeError("yt-dlp is required for YouTube ingestion.") from exc
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="yt_ingest_"))
+    out_template = str(tmp_dir / "%(id)s.%(ext)s")
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": out_template,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        downloaded = ydl.prepare_filename(info)
+
+    media_path = Path(downloaded)
+    title = str(info.get("title", "youtube_lecture"))
+    resolved_lecture_id = lecture_id or title
+
+    return ingest_local_media(media_path, lecture_id=resolved_lecture_id, source_url=url)
+
+
+def get_summaries(limit: int = 20) -> Dict[str, Any]:
+    cfg = _load_config()
+    transcripts_dir = _PROJECT_ROOT / cfg.get("transcripts_path", "data/transcripts")
+
+    stop = {
+        "the", "and", "for", "that", "with", "this", "from", "your", "have", "are", "was",
+        "will", "into", "about", "there", "their", "what", "when", "where", "which", "while",
+        "then", "than", "also", "into", "using", "used", "they", "them", "you", "our", "can",
+        "not", "but", "all", "any", "how", "why", "who", "its", "it", "is", "to", "of", "in",
+        "on", "a", "an", "as", "we", "be", "or", "by", "at", "if", "do", "does",
+    }
+
+    lectures: List[Dict[str, Any]] = []
+    files = sorted(transcripts_dir.glob("*_transcript.json"))[:limit]
+
+    for path in files:
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            lecture_id = str(data.get("lecture_id", path.stem.replace("_transcript", "")))
+            segments = data.get("segments", [])
+            text = " ".join(str(s.get("text", "")) for s in segments)
+            words = re.findall(r"[a-zA-Z][a-zA-Z\-]{2,}", text.lower())
+            topic_counts = Counter(w for w in words if w not in stop)
+            key_topics = [w for w, _ in topic_counts.most_common(8)]
+
+            summary_segments = [str(s.get("text", "")).strip() for s in segments[:8]]
+            summary = " ".join(x for x in summary_segments if x)
+            summary = (summary[:900] + "…") if len(summary) > 900 else summary
+            if not summary:
+                summary = "Summary unavailable for this lecture yet."
+
+            lectures.append({
+                "lecture_id": lecture_id,
+                "key_topics": key_topics,
+                "summary": summary,
+            })
+        except Exception as exc:
+            logger.warning("Failed to build summary for '%s': %s", path.name, exc)
+
+    return {"lectures": lectures}
