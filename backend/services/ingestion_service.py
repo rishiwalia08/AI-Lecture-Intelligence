@@ -227,6 +227,7 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
         raise RuntimeError("Invalid YouTube URL: could not parse video ID.")
 
     # Preferred path: transcript API (avoids YouTube bot-check download issues)
+    transcript_succeeded = False
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import]
 
@@ -234,24 +235,40 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
 
         # Try direct convenience API first
         try:
+            logger.info("Attempting direct transcript API for video_id=%s", video_id)
             transcript_items = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"])
-        except Exception:
+            logger.info("✓ Direct transcript API succeeded (%d items)", len(transcript_items))
+        except Exception as direct_exc:
+            logger.info("Direct transcript API failed: %s, trying list_transcripts fallback", direct_exc)
             # Fallback to explicit transcript selection (manual/generated/translated)
-            transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-            selected = None
             try:
-                selected = transcripts.find_transcript(["en", "en-US", "en-GB"])
-            except Exception:
+                transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+                logger.info("Available transcript kinds: %s", transcripts)
+                selected = None
                 try:
-                    selected = transcripts.find_generated_transcript(["en", "en-US", "en-GB"])
-                except Exception:
-                    selected = None
+                    logger.info("Trying find_transcript with ['en', 'en-US', 'en-GB']...")
+                    selected = transcripts.find_transcript(["en", "en-US", "en-GB"])
+                    logger.info("✓ Manual transcript found")
+                except Exception as manual_exc:
+                    logger.info("Manual transcript not found: %s, trying generated...", manual_exc)
+                    try:
+                        logger.info("Trying find_generated_transcript with ['en', 'en-US', 'en-GB']...")
+                        selected = transcripts.find_generated_transcript(["en", "en-US", "en-GB"])
+                        logger.info("✓ Generated transcript found")
+                    except Exception as gen_exc:
+                        logger.warning("No generated transcript found: %s", gen_exc)
+                        selected = None
 
-            if selected is not None:
-                try:
-                    transcript_items = selected.fetch()
-                except Exception:
-                    transcript_items = []
+                if selected is not None:
+                    try:
+                        transcript_items = selected.fetch()
+                        logger.info("✓ Transcript fetch succeeded (%d items)", len(transcript_items))
+                    except Exception as fetch_exc:
+                        logger.warning("Transcript fetch failed: %s", fetch_exc)
+                        transcript_items = []
+            except Exception as list_exc:
+                logger.warning("list_transcripts failed: %s", list_exc)
+                transcript_items = []
 
         segments = []
         for item in transcript_items:
@@ -263,18 +280,22 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
                 segments.append({"text": text, "start": start, "end": end})
 
         if segments:
+            transcript_succeeded = True
             resolved_lecture_id = _slugify(lecture_id or f"yt_{video_id}")
-            logger.info("YouTube transcript API succeeded for video_id=%s", video_id)
+            logger.info("✓ YouTube transcript API SUCCEEDED for video_id=%s with %d segments", video_id, len(segments))
             return _index_transcript_segments(
                 segments=segments,
                 lecture_id=resolved_lecture_id,
                 source_url=url,
                 audio_path="",
             )
+        else:
+            logger.warning("Transcript API returned 0 segments for video_id=%s", video_id)
     except Exception as transcript_exc:  # noqa: BLE001
         logger.warning("YouTube transcript API failed for %s: %s", video_id, transcript_exc)
 
     # Fallback path: download audio then transcribe
+    logger.info("YouTube transcript API unavailable or returned empty segments. Attempting yt-dlp audio download fallback...")
     try:
         import yt_dlp  # type: ignore[import]
     except ImportError as exc:
@@ -290,10 +311,13 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
         "format": "bestaudio/best",
         "outtmpl": out_template,
         "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
+        "quiet": False,  # Changed to False for better error diagnostics
+        "no_warnings": False,
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://www.youtube.com/",
         },
     }
 
@@ -306,24 +330,31 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
     temp_cookie_file: Optional[Path] = None
 
     if cookies_path:
+        logger.info("Using cookies from file: %s", cookies_path)
         ydl_opts["cookiefile"] = cookies_path
     elif cookies_b64:
         try:
+            logger.info("Decoding base64-encoded cookies...")
             decoded = base64.b64decode(cookies_b64.encode("utf-8"))
             temp_cookie_file = tmp_dir / "cookies.txt"
             temp_cookie_file.write_bytes(decoded)
             ydl_opts["cookiefile"] = str(temp_cookie_file)
-        except Exception:
+            logger.info("✓ Cookies loaded from YTDLP_COOKIES_B64")
+        except Exception as decode_exc:
+            logger.warning("Failed to decode YTDLP_COOKIES_B64: %s", decode_exc)
             temp_cookie_file = None
 
     try:
+        logger.info("Starting yt-dlp download for video_id=%s with options: %s", video_id, ydl_opts)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             downloaded = ydl.prepare_filename(info)
+            logger.info("✓ yt-dlp download succeeded, saved to: %s", downloaded)
     except Exception as exc:  # noqa: BLE001
+        logger.error("yt-dlp download failed with error: %s", exc, exc_info=True)
         raise RuntimeError(
-            "YouTube download blocked by anti-bot protection for this video. "
-            "Use upload ingest, use a video with public transcript, or configure YTDLP_COOKIES_PATH / YTDLP_COOKIES_B64 on Render."
+            f"YouTube download blocked by anti-bot protection for this video (error: {exc}). "
+            f"Use upload ingest, use a video with public transcript, or configure YTDLP_COOKIES_PATH / YTDLP_COOKIES_B64 on Render."
         ) from exc
     finally:
         try:
