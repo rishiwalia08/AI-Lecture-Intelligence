@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { fetchTranscript } from 'youtube-transcript'
+import HealthStatus from '../components/HealthStatus'
 import LoadingDots from '../components/LoadingDots'
 import PageTitle from '../components/PageTitle'
 import TypingText from '../components/TypingText'
@@ -35,7 +36,7 @@ function ChatPage() {
   const [lectureId, setLectureId] = useState('')
   const [selectedFile, setSelectedFile] = useState(null)
   const [manualText, setManualText] = useState('')
-  const [showManualTextForm, setShowManualTextForm] = useState(false)
+  const [activeIngestTab, setActiveIngestTab] = useState('youtube')
   const [ingestMessage, setIngestMessage] = useState('')
   const [messages, setMessages] = useState([
     {
@@ -64,18 +65,31 @@ function ChatPage() {
 
     try {
       const data = await askMutation.mutateAsync(trimmed)
+      
+      // Handle empty response or network error
+      if (!data || !data.answer) {
+        throw new Error('empty-response')
+      }
+      
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: data.answer || 'No answer returned.',
+          content: data.answer,
           sources: data.sources || [],
         },
       ])
     } catch (error) {
+      let errorMessage = 'I hit an error: ' + (error.message || 'Unknown error')
+      
+      // Friendly message for network/cold start errors
+      if (error.message === 'empty-response' || error.message.includes('Failed to fetch')) {
+        errorMessage = 'Server is waking up (Render free tier sleeps after inactivity). Please wait 30 seconds and try again.'
+      }
+      
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: `I hit an error: ${error.message || 'Unknown error'}` },
+        { role: 'assistant', content: errorMessage },
       ])
     }
   }
@@ -151,7 +165,7 @@ function ChatPage() {
       })
       setIngestMessage(`✅ Ingested ${result.lecture_id} (${result.num_chunks} chunks indexed)`)
       setManualText('')
-      setShowManualTextForm(false)
+      setActiveIngestTab('youtube')
     } catch (error) {
       setIngestMessage(`❌ ${error.message || 'Failed to ingest text.'}`)
     }
@@ -159,92 +173,148 @@ function ChatPage() {
 
   return (
     <section className="flex h-full flex-col">
-      <PageTitle title="AI Chat Assistant" subtitle="Ask lecture questions and get grounded answers with timestamps." />
+      <div className="mb-3 flex items-center justify-between">
+        <PageTitle title="AI Chat Assistant" subtitle="Ask lecture questions and get grounded answers with timestamps." />
+        <div className="w-48">
+          <HealthStatus />
+        </div>
+      </div>
 
       <div className="mb-4 rounded-2xl border border-slate-600/60 bg-slate-900/40 p-3">
-        <p className="mb-2 text-xs uppercase tracking-wider text-slate-300">Ingest Lecture Content</p>
+        <p className="mb-3 text-xs uppercase tracking-wider text-slate-300">Ingest Lecture Content</p>
 
-        {/* YouTube Section */}
-        <div className="mb-3 rounded-xl border border-slate-700 bg-slate-800/50 p-2">
-          <p className="mb-2 text-xs font-semibold text-slate-200">YouTube Video</p>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-            <input
-              value={youtubeUrl}
-              onChange={(e) => setYoutubeUrl(e.target.value)}
-              placeholder="Paste YouTube link"
-              className="rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-indigo-400"
-            />
-            <input
-              value={lectureId}
-              onChange={(e) => setLectureId(e.target.value)}
-              placeholder="Optional lecture id"
-              className="rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-indigo-400"
-            />
-            <button
-              type="button"
-              onClick={onIngestYoutube}
-              disabled={ingestYoutubeMutation.isPending || ingestYoutubeTranscriptMutation.isPending}
-              className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {ingestYoutubeTranscriptMutation.isPending ? 'Processing...' : 'Ingest YouTube'}
-            </button>
-          </div>
+        {/* Tab Navigation */}
+        <div className="mb-3 flex gap-2 border-b border-slate-600/40">
+          <button
+            type="button"
+            onClick={() => setActiveIngestTab('youtube')}
+            className={`px-4 py-2 text-sm font-medium transition ${
+              activeIngestTab === 'youtube'
+                ? 'border-b-2 border-indigo-400 text-indigo-300'
+                : 'text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            YouTube
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveIngestTab('file')}
+            className={`px-4 py-2 text-sm font-medium transition ${
+              activeIngestTab === 'file'
+                ? 'border-b-2 border-teal-400 text-teal-300'
+                : 'text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            Upload File
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveIngestTab('text')}
+            className={`px-4 py-2 text-sm font-medium transition ${
+              activeIngestTab === 'text'
+                ? 'border-b-2 border-purple-400 text-purple-300'
+                : 'text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            Paste Transcript
+          </button>
         </div>
 
-        {/* Video/Audio Upload Section */}
-        <div className="mb-3 rounded-xl border border-slate-700 bg-slate-800/50 p-2">
-          <p className="mb-2 text-xs font-semibold text-slate-200">Video/Audio File</p>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-            <input
-              type="file"
-              accept="video/*,audio/*"
-              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-              className="rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-200"
-            />
-            <div className="md:col-span-2">
+        {/* YouTube Tab */}
+        {activeIngestTab === 'youtube' && (
+          <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-800/50 p-3">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                placeholder="Paste YouTube link"
+                className="rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-indigo-400"
+              />
+              <input
+                value={lectureId}
+                onChange={(e) => setLectureId(e.target.value)}
+                placeholder="Optional lecture id"
+                className="rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-indigo-400"
+              />
+              <button
+                type="button"
+                onClick={onIngestYoutube}
+                disabled={ingestYoutubeMutation.isPending || ingestYoutubeTranscriptMutation.isPending}
+                className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {ingestYoutubeTranscriptMutation.isPending ? 'Processing...' : 'Ingest YouTube'}
+              </button>
+            </div>
+            <p className="text-xs text-slate-400">
+              💡 <strong>Note:</strong> If YouTube fails, download the audio as MP3 and upload it directly using the "Upload File" tab.
+            </p>
+          </div>
+        )}
+
+        {/* Upload File Tab */}
+        {activeIngestTab === 'file' && (
+          <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-800/50 p-3">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input
+                type="file"
+                accept="video/*,audio/*"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                className="rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-200"
+              />
+              <input
+                value={lectureId}
+                onChange={(e) => setLectureId(e.target.value)}
+                placeholder="Optional lecture id"
+                className="rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-teal-400"
+              />
               <button
                 type="button"
                 onClick={onIngestFile}
                 disabled={!selectedFile || ingestVideoMutation.isPending}
                 className="w-full rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-500 disabled:opacity-50"
               >
-                Upload + Ingest File
+                {ingestVideoMutation.isPending ? 'Processing...' : 'Upload & Ingest'}
               </button>
             </div>
+            <p className="text-xs text-slate-400">
+              📁 Supported: MP4, MP3, WAV, M4A, WebM. Max file size: 50MB. Transcription will take 2-5 minutes for 30-min audio.
+            </p>
           </div>
-        </div>
+        )}
 
-        {/* Manual Transcript Section */}
-        <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-2">
-          <button
-            type="button"
-            onClick={() => setShowManualTextForm(!showManualTextForm)}
-            className="mb-2 text-xs font-semibold text-slate-300 hover:text-slate-100"
-          >
-            {showManualTextForm ? '▼' : '▶'} Paste Transcript Text (Manual)
-          </button>
-          {showManualTextForm && (
-            <>
-              <textarea
-                value={manualText}
-                onChange={(e) => setManualText(e.target.value)}
-                placeholder="Paste lecture transcript or notes here..."
-                className="mb-2 w-full rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-indigo-400"
-                rows="4"
+        {/* Paste Transcript Tab */}
+        {activeIngestTab === 'text' && (
+          <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-800/50 p-3">
+            <textarea
+              value={manualText}
+              onChange={(e) => setManualText(e.target.value)}
+              placeholder="Paste lecture transcript, notes, or any text content here..."
+              className="w-full rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-purple-400"
+              rows="5"
+            />
+            <div className="flex gap-2">
+              <input
+                value={lectureId}
+                onChange={(e) => setLectureId(e.target.value)}
+                placeholder="Optional lecture title"
+                className="flex-1 rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-purple-400"
               />
               <button
                 type="button"
                 onClick={onIngestText}
                 disabled={!manualText.trim() || ingestTextMutation.isPending}
-                className="w-full rounded-lg bg-purple-600 px-3 py-2 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50"
+                className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50"
               >
                 {ingestTextMutation.isPending ? 'Processing...' : 'Ingest Text'}
               </button>
-            </>
-          )}
-        </div>
+            </div>
+            <p className="text-xs text-slate-400">
+              📝 Paste lecture notes, transcript, or any text. We'll automatically chunk and index it for Q&A.
+            </p>
+          </div>
+        )}
 
-        {ingestMessage ? <p className="mt-2 whitespace-pre-wrap text-xs text-slate-300">{ingestMessage}</p> : null}
+        {ingestMessage ? <p className="mt-3 whitespace-pre-wrap text-xs text-slate-300">{ingestMessage}</p> : null}
       </div>
 
       <div className="scrollbar-thin mb-4 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-slate-700/60 bg-slate-900/35 p-4">
