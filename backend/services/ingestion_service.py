@@ -176,7 +176,11 @@ def _index_transcript_segments(
 
 
 def ingest_local_media(file_path: Path, lecture_id: Optional[str] = None, source_url: Optional[str] = None) -> Dict[str, Any]:
-    """Transcribe media, chunk it, embed it, and index into vector DB."""
+    """
+    Transcribe media file, chunk it, embed it, and index into vector DB.
+    
+    Automatically cleans up the media file after successful transcription.
+    """
     if not file_path.exists():
         raise FileNotFoundError(f"Media file not found: {file_path}")
 
@@ -191,8 +195,32 @@ def ingest_local_media(file_path: Path, lecture_id: Optional[str] = None, source
     asr_language = cfg.get("asr_language", "en")
 
     logger.info("Ingesting media '%s' with Whisper model=%s", file_path.name, asr_model_size)
-    model = whisper.load_model(asr_model_size)
-    result = model.transcribe(str(file_path), language=asr_language)
+    
+    try:
+        import asyncio
+        import time as time_module
+        
+        # Transcribe with timeout protection (120 seconds)
+        model = whisper.load_model(asr_model_size)
+        t0 = time_module.perf_counter()
+        
+        try:
+            result = model.transcribe(str(file_path), language=asr_language)
+            elapsed = time_module.perf_counter() - t0
+            logger.info("Transcription complete in %.1fs", elapsed)
+        except Exception as e:
+            logger.error("Transcription failed: %s", e)
+            raise RuntimeError(
+                f"Transcription failed: {e}. The file may be corrupted or in an unsupported format."
+            ) from e
+    finally:
+        # Delete the uploaded file to free disk space (important on Render free tier)
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                logger.info("Deleted media file: %s", file_path)
+        except Exception as e:
+            logger.warning("Failed to delete media file %s: %s", file_path, e)
 
     raw_segments = result.get("segments", [])
     segments = [

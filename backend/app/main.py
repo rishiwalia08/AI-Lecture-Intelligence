@@ -14,6 +14,7 @@ Start the server
 
 from __future__ import annotations
 
+import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -40,11 +41,18 @@ logger = get_logger(__name__)
 # ──────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Minimal startup - RAG loads on first request, not at startup."""
+    """Startup: ensure temp directory exists. RAG loads on first request."""
     logger.info("🚀 Starting Interactive Lecture Intelligence API…")
+    
+    # Ensure temp directory exists for file uploads
+    tmp_dir = _PROJECT_ROOT / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("✓ Temp directory ready: %s", tmp_dir)
+    
     logger.info("ℹ️  RAG pipeline will initialize on first request (lazy loading).")
     yield
     logger.info("🛑 Shutting down API.")
+
 
 
 # ──────────────────────────────────────────────────────────────

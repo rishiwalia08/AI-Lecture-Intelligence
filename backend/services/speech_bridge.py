@@ -16,6 +16,8 @@ Usage
 
 from __future__ import annotations
 
+import asyncio
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -29,8 +31,11 @@ logger = get_logger(__name__)
 _TMP_DIR = Path(__file__).resolve().parents[2] / "tmp"
 _TMP_DIR.mkdir(exist_ok=True)
 
-# Whisper model size for query transcription — "base" is fast and accurate enough
-_WHISPER_MODEL_SIZE = "base"
+# Whisper model size — configurable via WHISPER_MODEL_SIZE env var
+# Use "base" on resource-constrained servers (Render free tier)
+# Options: "tiny", "base", "small", "medium", "large"
+_WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")
+logger.info("Using Whisper model size: %s", _WHISPER_MODEL_SIZE)
 
 
 @asynccontextmanager
@@ -53,9 +58,10 @@ async def _tmp_audio_file(data: bytes, suffix: str = ".wav") -> AsyncIterator[Pa
 async def transcribe_upload(
     audio_data: bytes,
     filename:   str = "audio.wav",
+    timeout_sec: int = 120,
 ) -> str:
     """
-    Transcribe raw audio bytes using OpenAI Whisper.
+    Transcribe raw audio bytes using OpenAI Whisper with timeout protection.
 
     Parameters
     ----------
@@ -63,6 +69,8 @@ async def transcribe_upload(
         Raw bytes from the uploaded audio file.
     filename : str
         Original filename — used to infer the file extension.
+    timeout_sec : int
+        Maximum time to allow for transcription in seconds (default 120).
 
     Returns
     -------
@@ -72,7 +80,7 @@ async def transcribe_upload(
     Raises
     ------
     ImportError  If openai-whisper is not installed.
-    RuntimeError If transcription produces no output.
+    RuntimeError If transcription produces no output or times out.
     """
     suffix = Path(filename).suffix or ".wav"
     t0     = time.perf_counter()
@@ -85,14 +93,33 @@ async def transcribe_upload(
         ) from exc
 
     async with _tmp_audio_file(audio_data, suffix=suffix) as audio_path:
-        logger.info("Transcribing audio file '%s' (%d bytes).", audio_path.name, len(audio_data))
-        model  = whisper.load_model(_WHISPER_MODEL_SIZE)
-        result = model.transcribe(str(audio_path))
+        logger.info("Transcribing audio file '%s' (%d bytes) with %ds timeout.", audio_path.name, len(audio_data), timeout_sec)
+        
+        try:
+            # Load model and transcribe with timeout
+            model = whisper.load_model(_WHISPER_MODEL_SIZE)
+            
+            # Run transcription in thread pool with timeout
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, model.transcribe, str(audio_path)),
+                timeout=timeout_sec
+            )
+        except asyncio.TimeoutError as exc:
+            logger.error("Transcription timed out after %ds", timeout_sec)
+            raise RuntimeError(
+                f"Transcription timed out (exceeded {timeout_sec}s). The file may be too large for the server. "
+                f"Try a shorter clip (under 10 minutes) or consider trimming the audio first."
+            ) from exc
+        except Exception as exc:
+            logger.error("Transcription failed: %s", exc)
+            raise
 
     text = (result.get("text") or "").strip()
+    elapsed = time.perf_counter() - t0
     logger.info(
         "Transcription complete in %.1fs: '%s'",
-        time.perf_counter() - t0, text[:80],
+        elapsed, text[:80],
     )
 
     if not text:

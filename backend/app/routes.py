@@ -222,6 +222,19 @@ async def speech_query(
     try:
         audio_data        = await audio.read()
         transcribed_query = await transcribe_upload(audio_data, filename=audio.filename or "audio.wav")
+    except RuntimeError as e:
+        # Handle transcription timeouts and other runtime errors
+        if "timed out" in str(e).lower():
+            logger.error("Transcription timed out: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                detail=str(e),
+            ) from e
+        logger.error("Transcription runtime error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
     except Exception as exc:  # noqa: BLE001
         logger.error("Transcription failed: %s", exc)
         raise HTTPException(
@@ -317,15 +330,38 @@ async def ingest_video_route(
     media: UploadFile = File(..., description="Video/audio file such as mp4, mp3, wav, m4a"),
     lecture_id: Optional[str] = Form(None),
 ) -> IngestResponse:
+    """
+    Upload and ingest a video/audio file.
+    
+    - Validates file size (max 50MB)
+    - Transcribes with Whisper (timeout: 120s)
+    - Cleans up temp file after processing
+    """
+    tmp_path = None
     try:
         data = await media.read()
+        
+        # File size validation (50MB max)
+        max_size_bytes = 50 * 1024 * 1024  # 50MB
+        if len(data) > max_size_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large ({len(data) / (1024*1024):.1f}MB). Maximum size is 50MB. "
+                       f"For larger files, consider trimming the audio first.",
+            )
+        
         suffix = Path(media.filename or "upload.mp4").suffix or ".mp4"
         tmp_path = Path("tmp") / f"upload_{int(time.time())}{suffix}"
         tmp_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.write_bytes(data)
+        
+        logger.info("/ingest_video: file='%s', size=%dMB", tmp_path.name, len(data) / (1024*1024))
 
         payload = ingest_local_media(tmp_path, lecture_id=lecture_id)
         return IngestResponse(**payload)
+    except HTTPException:
+        # Re-raise HTTP exceptions (file size, etc)
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("/ingest_video error: %s", exc)
         raise HTTPException(
@@ -333,11 +369,13 @@ async def ingest_video_route(
             detail=f"Video ingestion failed: {exc}",
         ) from exc
     finally:
+        # Clean up temp file
         try:
-            if 'tmp_path' in locals() and tmp_path.exists():
+            if tmp_path and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+                logger.debug("Cleaned up temp file: %s", tmp_path)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to clean up temp file: %s", e)
 
 
 @router.post(
