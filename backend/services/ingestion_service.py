@@ -344,6 +344,9 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
             logger.warning("Failed to decode YTDLP_COOKIES_B64: %s", decode_exc)
             temp_cookie_file = None
 
+    info: Dict[str, Any] = {}
+    downloaded: Optional[str] = None
+
     try:
         logger.info("Starting yt-dlp download for video_id=%s with options: %s", video_id, ydl_opts)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -352,16 +355,42 @@ def ingest_youtube(url: str, lecture_id: Optional[str] = None) -> Dict[str, Any]
             logger.info("✓ yt-dlp download succeeded, saved to: %s", downloaded)
     except Exception as exc:  # noqa: BLE001
         logger.error("yt-dlp download failed with error: %s", exc, exc_info=True)
-        raise RuntimeError(
-            f"YouTube download blocked by anti-bot protection for this video (error: {exc}). "
-            f"Use upload ingest, use a video with public transcript, or configure YTDLP_COOKIES_PATH / YTDLP_COOKIES_B64 on Render."
-        ) from exc
+
+        # Final fallback: pytubefix downloader
+        try:
+            logger.info("Trying pytubefix fallback for video_id=%s", video_id)
+            from pytubefix import YouTube  # type: ignore[import]
+
+            yt = YouTube(url)
+            stream = (
+                yt.streams
+                .filter(only_audio=True)
+                .order_by("abr")
+                .desc()
+                .first()
+            )
+            if stream is None:
+                raise RuntimeError("No downloadable audio stream found by pytubefix.")
+
+            downloaded = stream.download(output_path=str(tmp_dir))
+            info = {"title": yt.title or "youtube_lecture"}
+            logger.info("✓ pytubefix download succeeded, saved to: %s", downloaded)
+        except Exception as py_exc:  # noqa: BLE001
+            logger.error("pytubefix fallback failed: %s", py_exc, exc_info=True)
+            raise RuntimeError(
+                "YouTube ingest failed after transcript API + yt-dlp + pytubefix attempts. "
+                "This video is strongly bot-protected or unavailable from server-side networks. "
+                "Please use Upload+Ingest File, or configure YTDLP_COOKIES_PATH / YTDLP_COOKIES_B64 on Render."
+            ) from py_exc
     finally:
         try:
             if temp_cookie_file and temp_cookie_file.exists():
                 temp_cookie_file.unlink(missing_ok=True)
         except Exception:
             pass
+
+    if not downloaded:
+        raise RuntimeError("No media file downloaded from YouTube.")
 
     media_path = Path(downloaded)
     title = str(info.get("title", "youtube_lecture"))
