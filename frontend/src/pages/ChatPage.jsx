@@ -19,7 +19,9 @@ function extractVideoId(url) {
   try {
     const urlObj = new URL(url)
     if (urlObj.hostname.includes('youtube.com')) {
-      return urlObj.searchParams.get('v')
+      if (urlObj.pathname === '/watch') return urlObj.searchParams.get('v')
+      if (urlObj.pathname.startsWith('/shorts/')) return urlObj.pathname.split('/')[2] || null
+      if (urlObj.pathname.startsWith('/embed/')) return urlObj.pathname.split('/')[2] || null
     }
     if (urlObj.hostname.includes('youtu.be')) {
       return urlObj.pathname.slice(1)
@@ -98,7 +100,7 @@ function ChatPage() {
     const url = youtubeUrl.trim()
     if (!url || ingestYoutubeMutation.isPending || ingestYoutubeTranscriptMutation.isPending) return
 
-    setIngestMessage('Attempting to fetch transcript client-side...')
+    setIngestMessage('Attempting transcript extraction...')
 
     try {
       const videoId = extractVideoId(url)
@@ -107,31 +109,34 @@ function ChatPage() {
         return
       }
 
-      // Try client-side transcript extraction first
-      const transcript = await fetchTranscript(videoId)
+      let transcript = null
+      try {
+        // Try client-side transcript extraction first
+        transcript = await fetchTranscript(videoId)
+      } catch {
+        transcript = null
+      }
 
-      if (!transcript || transcript.length === 0) {
-        // Fall back to server-side extraction
-        setIngestMessage('Client-side extraction unavailable, trying server...')
-        const result = await ingestYoutubeMutation.mutateAsync({ url, lectureId })
+      if (transcript && transcript.length > 0) {
+        setIngestMessage('Processing transcript...')
+        const result = await ingestYoutubeTranscriptMutation.mutateAsync({
+          videoId,
+          transcript: transcript.map((item) => ({
+            text: item.text,
+            start: item.offset / 1000,
+            duration: (item.duration || 0) / 1000,
+          })),
+          title: null,
+          lectureId,
+        })
         setIngestMessage(`✅ Ingested ${result.lecture_id} (${result.num_chunks} chunks indexed)`)
         setYoutubeUrl('')
         return
       }
 
-      // Got transcript client-side, send it to backend
-      setIngestMessage('Processing transcript...')
-      const result = await ingestYoutubeTranscriptMutation.mutateAsync({
-        videoId,
-        transcript: transcript.map((item) => ({
-          text: item.text,
-          start: item.offset / 1000,
-          duration: (item.duration || 0) / 1000,
-        })),
-        title: null,
-        lectureId,
-      })
-
+      // Fall back to server-side extraction/download pipeline
+      setIngestMessage('Client-side extraction unavailable, trying server...')
+      const result = await ingestYoutubeMutation.mutateAsync({ url, lectureId })
       setIngestMessage(`✅ Ingested ${result.lecture_id} (${result.num_chunks} chunks indexed)`)
       setYoutubeUrl('')
     } catch (error) {

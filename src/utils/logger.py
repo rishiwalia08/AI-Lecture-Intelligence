@@ -21,7 +21,7 @@ from typing import Optional
 # ──────────────────────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────────────────────
-DEFAULT_LOG_DIR = Path(__file__).resolve().parents[3] / "logs"
+DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
 DEFAULT_LOG_FILE = DEFAULT_LOG_DIR / "pipeline.log"
 DEFAULT_LOG_LEVEL = logging.INFO
 
@@ -63,7 +63,7 @@ def get_logger(
         return logging.getLogger(name)
 
     log_file = log_file or DEFAULT_LOG_FILE
-    _ensure_log_dir(log_file)
+    file_logging_enabled = _ensure_log_dir(log_file)
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -78,13 +78,17 @@ def get_logger(
         level,
     )
 
-    # File handler
-    _add_handler(
-        logger,
-        logging.FileHandler(log_file, encoding="utf-8"),
-        formatter,
-        level,
-    )
+    # File handler (best effort; logger should still work with console only)
+    if file_logging_enabled:
+        try:
+            _add_handler(
+                logger,
+                logging.FileHandler(log_file, encoding="utf-8"),
+                formatter,
+                level,
+            )
+        except Exception:
+            pass
 
     logger.propagate = False  # avoid double-logging to root
     _configured_loggers.add(name)
@@ -94,9 +98,13 @@ def get_logger(
 # ──────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────
-def _ensure_log_dir(log_file: Path) -> None:
+def _ensure_log_dir(log_file: Path) -> bool:
     """Create log directory if it doesn't exist."""
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        return True
+    except Exception:
+        return False
 
 
 def _add_handler(

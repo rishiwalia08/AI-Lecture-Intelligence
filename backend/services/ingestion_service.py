@@ -200,8 +200,17 @@ def ingest_local_media(file_path: Path, lecture_id: Optional[str] = None, source
         import asyncio
         import time as time_module
         
-        # Transcribe with timeout protection (120 seconds)
-        model = whisper.load_model(asr_model_size)
+        # Transcribe with resilient model loading. Some deployments have an
+        # older Whisper package that does not recognize newer aliases.
+        try:
+            model = whisper.load_model(asr_model_size)
+        except Exception as model_exc:
+            logger.warning(
+                "Failed to load Whisper model '%s' (%s). Falling back to 'base'.",
+                asr_model_size,
+                model_exc,
+            )
+            model = whisper.load_model("base")
         t0 = time_module.perf_counter()
         
         try:
