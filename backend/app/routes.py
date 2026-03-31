@@ -24,12 +24,21 @@ from backend.app.schemas import (
     HealthResponse,
     IngestResponse,
     IngestYoutubeRequest,
+    IngestYoutubeTranscriptRequest,
+    IngestTextRequest,
     SummariesResponse,
     QueryRequest,
     SourceItem,
     SpeechQueryResponse,
 )
-from backend.services.ingestion_service import attach_video_urls, get_summaries, ingest_local_media, ingest_youtube
+from backend.services.ingestion_service import (
+    attach_video_urls,
+    get_summaries,
+    ingest_local_media,
+    ingest_youtube,
+    ingest_transcript_segments,
+    ingest_raw_text,
+)
 from backend.services.rag_bridge import get_rag_bridge
 from backend.services.speech_bridge import transcribe_upload
 from src.utils.logger import get_logger
@@ -329,6 +338,86 @@ async def ingest_video_route(
                 tmp_path.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+@router.post(
+    "/ingest_youtube_transcript",
+    response_model=IngestResponse,
+    tags=["ingestion"],
+    summary="Ingest a pre-fetched YouTube transcript (client-side extraction).",
+)
+async def ingest_youtube_transcript_route(req: IngestYoutubeTranscriptRequest) -> IngestResponse:
+    """
+    Ingest a YouTube transcript that was already fetched client-side.
+
+    This endpoint allows the frontend to bypass server-side YouTube blocking
+    by extracting the transcript client-side and sending it to the backend.
+
+    - Client fetches transcript using youtube-transcript npm package
+    - Client POSTs the transcript data here
+    - Backend chunks, embeds, and indexes into ChromaDB
+    """
+    try:
+        # Convert request segments to dict format
+        transcript_dicts = [seg.model_dump() for seg in req.transcript]
+        payload = ingest_transcript_segments(
+            transcript_segments=transcript_dicts,
+            title=req.title,
+            lecture_id=req.lecture_id,
+            video_id=req.video_id,
+            source_url=f"https://www.youtube.com/watch?v={req.video_id}",
+        )
+        return IngestResponse(**payload)
+    except ValueError as e:
+        logger.error("/ingest_youtube_transcript validation error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/ingest_youtube_transcript error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Transcript ingestion failed: {exc}",
+        ) from exc
+
+
+@router.post(
+    "/ingest_text",
+    response_model=IngestResponse,
+    tags=["ingestion"],
+    summary="Ingest raw text as a lecture (manual transcript).",
+)
+async def ingest_text_route(req: IngestTextRequest) -> IngestResponse:
+    """
+    Ingest raw text directly into the vector store.
+
+    Useful for:
+    - Manually pasted lecture notes/transcripts
+    - Student summaries
+    - Raw text documents
+
+    The text is chunked and embedded automatically.
+    """
+    try:
+        payload = ingest_raw_text(
+            text=req.text,
+            title=req.title,
+            lecture_id=req.lecture_id,
+        )
+        return IngestResponse(**payload)
+    except ValueError as e:
+        logger.error("/ingest_text validation error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/ingest_text error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Text ingestion failed: {exc}",
+        ) from exc
 
 
 @router.get(

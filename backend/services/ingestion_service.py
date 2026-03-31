@@ -440,3 +440,150 @@ def get_summaries(limit: int = 20) -> Dict[str, Any]:
             logger.warning("Failed to build summary for '%s': %s", path.name, exc)
 
     return {"lectures": lectures}
+
+
+def ingest_transcript_segments(
+    transcript_segments: List[Dict[str, Any]],
+    title: Optional[str] = None,
+    lecture_id: Optional[str] = None,
+    video_id: Optional[str] = None,
+    source_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Ingest pre-fetched transcript segments (e.g., from client-side YouTube API).
+
+    Parameters
+    ----------
+    transcript_segments : List[Dict[str, Any]]
+        List of transcript segments with keys:
+        - text (str): segment text
+        - start (float): start time in seconds
+        - duration (float): segment duration in seconds
+    title : str, optional
+        Lecture title (used to generate lecture_id if not provided)
+    lecture_id : str, optional
+        Custom lecture ID. If not provided, generated from title or timestamp.
+    video_id : str, optional
+        YouTube video ID (stored in metadata)
+    source_url : str, optional
+        Full source URL (stored for playback links)
+
+    Returns
+    -------
+    Dict with keys: lecture_id, num_segments, num_chunks, indexed_vectors, duration_s, message
+    """
+    # Resolve lecture_id
+    if not lecture_id:
+        if title:
+            lecture_id = _slugify(title)
+        else:
+            lecture_id = f"lecture_{int(__import__('time').time())}"
+
+    logger.info("ingest_transcript_segments: lecture_id='%s', segments=%d", lecture_id, len(transcript_segments))
+
+    # Convert transcript segments to normalized format expected by _index_transcript_segments
+    normalized_segments = []
+    total_duration = 0.0
+
+    for i, seg in enumerate(transcript_segments):
+        text = seg.get("text", "").strip()
+        if not text:
+            continue
+
+        start = float(seg.get("start", 0.0))
+        duration = float(seg.get("duration", 0.0))
+        end = start + duration
+
+        normalized_segments.append({
+            "id": i,
+            "seek": start,
+            "start": start,
+            "end": end,
+            "text": text,
+        })
+        total_duration = max(total_duration, end)
+
+    if not normalized_segments:
+        raise ValueError("No valid transcript segments provided.")
+
+    # Index the segments
+    result = _index_transcript_segments(
+        segments=normalized_segments,
+        lecture_id=lecture_id,
+        source_url=source_url,
+        audio_path=f"youtube_video_{video_id}" if video_id else "",
+    )
+
+    # Update source map if we have a video_id
+    if video_id:
+        source_map = _load_source_map()
+        # Build YouTube URL
+        yt_url = f"https://www.youtube.com/watch?v={video_id}"
+        source_map[lecture_id] = yt_url
+        _save_source_map(source_map)
+        logger.info("Stored source URL for '%s': %s", lecture_id, yt_url)
+
+    return result
+
+
+def ingest_raw_text(
+    text: str,
+    title: Optional[str] = None,
+    lecture_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Ingest raw text (e.g., manually pasted transcript) directly into ChromaDB.
+
+    Parameters
+    ----------
+    text : str
+        Raw text to ingest (lecture notes, transcript, etc.)
+    title : str, optional
+        Lecture title (used to generate lecture_id if not provided)
+    lecture_id : str, optional
+        Custom lecture ID. If not provided, generated from title or timestamp.
+
+    Returns
+    -------
+    Dict with keys: lecture_id, num_segments, num_chunks, indexed_vectors, duration_s, message
+    """
+    # Resolve lecture_id
+    if not lecture_id:
+        if title:
+            lecture_id = _slugify(title)
+        else:
+            lecture_id = f"lecture_{int(__import__('time').time())}"
+
+    logger.info("ingest_raw_text: lecture_id='%s', text_length=%d", lecture_id, len(text))
+
+    if not text or not text.strip():
+        raise ValueError("Text cannot be empty.")
+
+    # Create a pseudo-transcript from the raw text
+    # Split by newlines and treat each non-empty line as a segment
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+    if not lines:
+        raise ValueError("No valid text content found after parsing.")
+
+    # Create segments with dummy timestamps (no real timing info)
+    segments = []
+    for i, line in enumerate(lines):
+        segments.append({
+            "id": i,
+            "seek": 0.0,
+            "start": 0.0,
+            "end": 0.0,
+            "text": line,
+        })
+
+    # Index the segments
+    result = _index_transcript_segments(
+        segments=segments,
+        lecture_id=lecture_id,
+        source_url="",
+        audio_path="",
+    )
+
+    # Note: duration will be 0 since we don't have real timing info
+    return result

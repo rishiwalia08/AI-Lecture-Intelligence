@@ -117,3 +117,25 @@ class LectureSummaryItem(BaseModel):
 
 class SummariesResponse(BaseModel):
     lectures: List[LectureSummaryItem] = Field(default_factory=list)
+
+
+class TranscriptSegment(BaseModel):
+    """A single transcript segment with timing."""
+    text: str = Field(..., description="Segment text content")
+    start: float = Field(default=0.0, description="Start time in seconds")
+    duration: float = Field(default=0.0, description="Duration in seconds")
+
+
+class IngestYoutubeTranscriptRequest(BaseModel):
+    """Body for POST /ingest_youtube_transcript (client-side fetched)."""
+    video_id: str = Field(..., description="YouTube video ID")
+    transcript: List[TranscriptSegment] = Field(..., description="Pre-fetched transcript segments")
+    title: Optional[str] = Field(None, description="Optional lecture title")
+    lecture_id: Optional[str] = Field(None, description="Optional custom lecture_id")
+
+
+class IngestTextRequest(BaseModel):
+    """Body for POST /ingest_text (manual transcript)."""
+    text: str = Field(..., min_length=10, max_length=1_000_000, description="Raw text transcript/notes")
+    title: Optional[str] = Field(None, description="Optional lecture title")
+    lecture_id: Optional[str] = Field(None, description="Optional custom lecture_id")
