@@ -66,10 +66,20 @@ async def health(request: Request) -> HealthResponse:
     bridge   = get_rag_bridge()
     rag_ready = bridge.ready
     msg = "RAG pipeline ready." if rag_ready else f"RAG not ready: {bridge.error or 'initialising'}"
+    
+    # Get document count from vector store if RAG is ready
+    documents_indexed = 0
+    if rag_ready and bridge._svc is not None:
+        try:
+            documents_indexed = bridge._svc._vectorstore.count()
+        except Exception as e:
+            logger.warning("Could not retrieve document count: %s", e)
+    
     return HealthResponse(
         status="ok",
         version="1.0.0",
         rag_ready=rag_ready,
+        documents_indexed=documents_indexed,
         message=msg,
     )
 
@@ -105,6 +115,20 @@ async def ask(req: QueryRequest) -> AnswerResponse:
     logger.info("/ask: query='%s'", req.query[:100])
     t0 = time.perf_counter()
 
+    # Check if vector store has any indexed documents
+    try:
+        doc_count = bridge._svc._vectorstore.count() if bridge._svc else 0
+        if doc_count == 0:
+            logger.warning("/ask: vector store is empty")
+            return AnswerResponse(
+                answer="No lecture has been ingested yet. Please upload a video or audio file first, then ask your question.",
+                sources=[],
+                query_time_s=0.0,
+                grounded=False,
+            )
+    except Exception as e:
+        logger.warning("/ask: could not check document count: %s", e)
+
     try:
         result = bridge.ask(
             query=req.query,
@@ -112,11 +136,30 @@ async def ask(req: QueryRequest) -> AnswerResponse:
             lecture_filter=req.lecture_filter,
             provider=req.provider,
         )
+    except RuntimeError as e:
+        # Handle model loading / initialization errors
+        if "not ready" in str(e).lower():
+            logger.error("/ask: RAG service not ready: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI model is temporarily unavailable. Please try again in a moment.",
+            ) from e
+        logger.error("/ask: runtime error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="AI model is temporarily unavailable. Please try again in a moment.",
+        ) from e
+    except MemoryError as e:
+        logger.error("/ask: out of memory: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI model is temporarily unavailable. Please try again in a moment.",
+        ) from e
     except Exception as exc:  # noqa: BLE001
         logger.error("/ask error: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"RAG pipeline error: {exc}",
+            detail="AI model is temporarily unavailable. Please try again in a moment.",
         ) from exc
 
     elapsed = round(time.perf_counter() - t0, 3)
@@ -177,6 +220,21 @@ async def speech_query(
             detail=f"Audio transcription failed: {exc}",
         ) from exc
 
+    # Check if vector store has any indexed documents
+    try:
+        doc_count = bridge._svc._vectorstore.count() if bridge._svc else 0
+        if doc_count == 0:
+            logger.warning("/speech_query: vector store is empty")
+            return SpeechQueryResponse(
+                transcribed_query=transcribed_query,
+                answer="No lecture has been ingested yet. Please upload a video or audio file first, then ask your question.",
+                sources=[],
+                query_time_s=0.0,
+                grounded=False,
+            )
+    except Exception as e:
+        logger.warning("/speech_query: could not check document count: %s", e)
+
     # ── RAG ───────────────────────────────────────────────────
     try:
         result = bridge.ask(
@@ -184,11 +242,30 @@ async def speech_query(
             top_n=top_k,
             lecture_filter=lecture_filter,
         )
+    except RuntimeError as e:
+        # Handle model loading / initialization errors
+        if "not ready" in str(e).lower():
+            logger.error("/speech_query: RAG service not ready: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI model is temporarily unavailable. Please try again in a moment.",
+            ) from e
+        logger.error("/speech_query: runtime error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="AI model is temporarily unavailable. Please try again in a moment.",
+        ) from e
+    except MemoryError as e:
+        logger.error("/speech_query: out of memory: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI model is temporarily unavailable. Please try again in a moment.",
+        ) from e
     except Exception as exc:  # noqa: BLE001
         logger.error("/speech_query RAG error: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"RAG pipeline error: {exc}",
+            detail="AI model is temporarily unavailable. Please try again in a moment.",
         ) from exc
 
     elapsed = round(time.perf_counter() - t0, 3)

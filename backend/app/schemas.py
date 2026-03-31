@@ -89,6 +89,7 @@ class HealthResponse(BaseModel):
     status:    str  = "ok"
     version:   str  = "1.0.0"
     rag_ready: bool = False
+    documents_indexed: int = 0
     message:   str  = ""
 
 
