@@ -34,12 +34,14 @@ export const api = {
   health: () => request('/health'),
   knowledgeGraph: () => request('/knowledge_graph'),
   ingestYoutube: (payload) => request('/ingest_youtube', { method: 'POST', body: JSON.stringify(payload) }),
+  ingestYoutubeTranscript: (payload) => request('/ingest_youtube_transcript', { method: 'POST', body: JSON.stringify(payload) }),
   ingestVideo: (file, lectureId = '') => {
     const form = new FormData()
     form.append('media', file)
     if (lectureId.trim()) form.append('lecture_id', lectureId.trim())
     return requestForm('/ingest_video', form)
   },
+  ingestText: (payload) => request('/ingest_text', { method: 'POST', body: JSON.stringify(payload) }),
   flashcards: () => request('/flashcards'),
   summaries: () => request('/summaries'),
 }

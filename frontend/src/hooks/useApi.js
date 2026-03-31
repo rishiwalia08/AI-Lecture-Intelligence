@@ -37,8 +37,32 @@ export function useIngestYoutube() {
   })
 }
 
+export function useIngestYoutubeTranscript() {
+  return useMutation({
+    mutationFn: ({ videoId, transcript, title, lectureId }) =>
+      api.ingestYoutubeTranscript({
+        video_id: videoId,
+        transcript,
+        title: title || null,
+        lecture_id: lectureId || null,
+      }),
+  })
+}
+
 export function useIngestVideo() {
   return useMutation({
     mutationFn: ({ file, lectureId }) => api.ingestVideo(file, lectureId),
   })
 }
+
+export function useIngestText() {
+  return useMutation({
+    mutationFn: ({ text, title, lectureId }) =>
+      api.ingestText({
+        text,
+        title: title || null,
+        lecture_id: lectureId || null,
+      }),
+  })
+}
+
