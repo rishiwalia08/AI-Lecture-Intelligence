@@ -143,6 +143,85 @@ class VideoIngestionService:
             pass
         return url
 
+    def extract_youtube_video_id(self, url: str) -> str | None:
+        normalized = self._normalize_youtube_url(url)
+        try:
+            parsed = urlparse(normalized)
+            query = parse_qs(parsed.query)
+            video_id = (query.get("v") or [""])[0]
+            return video_id or None
+        except Exception:
+            return None
+
+    def fetch_youtube_transcript(self, url: str) -> list[dict[str, Any]]:
+        video_id = self.extract_youtube_video_id(url)
+        if not video_id:
+            raise RuntimeError("Could not parse YouTube video id for transcript fallback")
+
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi  # pyright: ignore[reportMissingImports]
+        except Exception as exc:
+            raise RuntimeError(
+                "youtube-transcript-api is not installed. Add it to backend/requirements.txt"
+            ) from exc
+
+        transcript_entries = None
+
+        # Try direct API first.
+        try:
+            transcript_entries = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+        except Exception:
+            transcript_entries = None
+
+        # Fallback to transcript listing and manual/asr selection.
+        if transcript_entries is None:
+            try:
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                selected = None
+                for code in ["en", "en-US", "en-GB"]:
+                    try:
+                        selected = transcript_list.find_transcript([code])
+                        break
+                    except Exception:
+                        continue
+
+                if selected is None:
+                    try:
+                        selected = transcript_list.find_manually_created_transcript(["en"])
+                    except Exception:
+                        selected = None
+
+                if selected is None:
+                    try:
+                        selected = transcript_list.find_generated_transcript(["en"])
+                    except Exception:
+                        selected = None
+
+                if selected is None:
+                    raise RuntimeError("No English transcript available")
+
+                transcript_entries = selected.fetch()
+            except Exception as exc:
+                raise RuntimeError(f"Transcript fallback failed: {exc}") from exc
+
+        segments: list[dict[str, Any]] = []
+        for row in transcript_entries:
+            start = float(row.get("start", 0.0))
+            duration = float(row.get("duration", 0.0))
+            text = (row.get("text") or "").strip()
+            if not text:
+                continue
+            segments.append({
+                "start": start,
+                "end": start + max(0.1, duration),
+                "text": text,
+            })
+
+        if not segments:
+            raise RuntimeError("Transcript fallback returned no usable segments")
+
+        return segments
+
     def extract_audio(self, video_path: Path, out_dir: Path) -> Path:
         out_dir.mkdir(parents=True, exist_ok=True)
         audio_path = out_dir / "audio.wav"
