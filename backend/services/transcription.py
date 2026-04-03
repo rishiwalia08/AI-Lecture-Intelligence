@@ -165,50 +165,103 @@ class VideoIngestionService:
                 "youtube-transcript-api is not installed. Add it to backend/requirements.txt"
             ) from exc
 
-        transcript_entries = None
+        transcript_entries: Any = None
 
-        # Try direct API first.
+        # Compatibility across youtube-transcript-api versions.
+        api_instance: Any = None
         try:
-            transcript_entries = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+            api_instance = YouTubeTranscriptApi()
         except Exception:
-            transcript_entries = None
+            api_instance = None
+
+        def _try_call(target: Any, method_name: str, *args: Any, **kwargs: Any) -> Any:
+            if target is None or not hasattr(target, method_name):
+                return None
+            method = getattr(target, method_name)
+            try:
+                return method(*args, **kwargs)
+            except TypeError:
+                # Some versions don't accept keyword args like languages.
+                try:
+                    return method(*args)
+                except Exception:
+                    return None
+            except Exception:
+                return None
+
+        # Direct transcript fetch attempts.
+        for target, method_name in [
+            (YouTubeTranscriptApi, "get_transcript"),
+            (YouTubeTranscriptApi, "fetch"),
+            (api_instance, "fetch"),
+        ]:
+            result = _try_call(target, method_name, video_id, languages=["en"])
+            if result is None:
+                continue
+            if hasattr(result, "to_raw_data"):
+                try:
+                    result = result.to_raw_data()
+                except Exception:
+                    pass
+            transcript_entries = result
+            break
 
         # Fallback to transcript listing and manual/asr selection.
         if transcript_entries is None:
             try:
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                transcript_list = (
+                    _try_call(YouTubeTranscriptApi, "list_transcripts", video_id)
+                    or _try_call(api_instance, "list_transcripts", video_id)
+                    or _try_call(api_instance, "list", video_id)
+                )
+                if transcript_list is None:
+                    raise RuntimeError("Transcript listing API unavailable in this youtube-transcript-api version")
                 selected = None
                 for code in ["en", "en-US", "en-GB"]:
                     try:
-                        selected = transcript_list.find_transcript([code])
+                        if hasattr(transcript_list, "find_transcript"):
+                            selected = transcript_list.find_transcript([code])
                         break
                     except Exception:
                         continue
 
                 if selected is None:
                     try:
-                        selected = transcript_list.find_manually_created_transcript(["en"])
+                        if hasattr(transcript_list, "find_manually_created_transcript"):
+                            selected = transcript_list.find_manually_created_transcript(["en"])
                     except Exception:
                         selected = None
 
                 if selected is None:
                     try:
-                        selected = transcript_list.find_generated_transcript(["en"])
+                        if hasattr(transcript_list, "find_generated_transcript"):
+                            selected = transcript_list.find_generated_transcript(["en"])
                     except Exception:
                         selected = None
 
                 if selected is None:
                     raise RuntimeError("No English transcript available")
 
-                transcript_entries = selected.fetch()
+                fetched = selected.fetch() if hasattr(selected, "fetch") else selected
+                if hasattr(fetched, "to_raw_data"):
+                    try:
+                        fetched = fetched.to_raw_data()
+                    except Exception:
+                        pass
+                transcript_entries = fetched
             except Exception as exc:
                 raise RuntimeError(f"Transcript fallback failed: {exc}") from exc
 
         segments: list[dict[str, Any]] = []
         for row in transcript_entries:
-            start = float(row.get("start", 0.0))
-            duration = float(row.get("duration", 0.0))
-            text = (row.get("text") or "").strip()
+            if isinstance(row, dict):
+                start = float(row.get("start", 0.0))
+                duration = float(row.get("duration", 0.0))
+                text = (row.get("text") or "").strip()
+            else:
+                start = float(getattr(row, "start", 0.0))
+                duration = float(getattr(row, "duration", 0.0))
+                text = str(getattr(row, "text", "") or "").strip()
             if not text:
                 continue
             segments.append({
