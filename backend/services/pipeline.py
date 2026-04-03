@@ -30,13 +30,9 @@ class LecturePipeline:
         video_id = str(uuid4())
         work_dir = self.artifact_repo.video_dir(video_id)
 
-        try:
-            video_path = self.ingestor.download_youtube_video(youtube_url, work_dir)
-            audio_path = self.ingestor.extract_audio(video_path, work_dir)
-            segments = self.ingestor.transcribe_audio(audio_path)
-        except Exception:
-            # Hosted fallback path: fetch transcript directly if yt-dlp/audio path fails.
-            segments = self.ingestor.fetch_youtube_transcript(youtube_url)
+        # On hosted Render environments, YouTube download is frequently blocked.
+        # Prefer direct transcript ingestion to keep the web service reliable.
+        segments = self.ingestor.fetch_youtube_transcript(youtube_url)
 
         chunks = self.ingestor.chunk_transcript(segments)
 

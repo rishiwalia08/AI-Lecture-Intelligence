@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from api.schemas import QARequest, QAResponse, SearchRequest, TopicSearchResponse
 from db.repository import ArtifactRepository, MetadataRepository
+from services.transcription import YoutubeTranscriptUnavailableError
 
 router = APIRouter()
 
@@ -85,6 +86,8 @@ async def ingest_video(
         tmp_path.unlink(missing_ok=True)
         return {"message": "Video uploaded and ingested successfully", "video": payload}
 
+    except YoutubeTranscriptUnavailableError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except subprocess.CalledProcessError as exc:  # type: ignore[name-defined]
         raise HTTPException(status_code=500, detail=f"External tool failed: {exc}") from exc
     except Exception as exc:

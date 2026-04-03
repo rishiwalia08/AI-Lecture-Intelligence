@@ -16,6 +16,10 @@ FILLER_PATTERN = re.compile(
 )
 
 
+class YoutubeTranscriptUnavailableError(RuntimeError):
+    pass
+
+
 class VideoIngestionService:
     def __init__(self) -> None:
         self._whisper_model: Any | None = None
@@ -185,7 +189,7 @@ class VideoIngestionService:
 
         transcript_entries: list[dict[str, Any]] = []
 
-        # 1) Primary path: direct transcript fetch using the installed library.
+        # Primary path: direct transcript fetch using the installed library.
         try:
             api_instance = YouTubeTranscriptApi()
             for languages in (["en"], ["en-US"], ["en-GB"], []):
@@ -202,31 +206,11 @@ class VideoIngestionService:
         except Exception:
             transcript_entries = []
 
-        # 2) Fallback: CLI invocation with correct argument ordering.
         if not transcript_entries:
-            try:
-                cmd = [
-                    sys.executable,
-                    "-m",
-                    "youtube_transcript_api",
-                    video_id,
-                    "--languages",
-                    "en",
-                    "--format",
-                    "json",
-                ]
-                proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                if proc.returncode == 0 and proc.stdout.strip():
-                    parsed = json.loads(proc.stdout)
-                    transcript_entries = _normalize_transcript_payload(parsed)
-                else:
-                    stderr = (proc.stderr or proc.stdout or "").strip()
-                    raise RuntimeError(stderr[:600] or "youtube_transcript_api CLI returned no output")
-            except Exception as exc:
-                raise RuntimeError(f"Transcript fallback failed: {exc}") from exc
-
-        if not transcript_entries:
-            raise RuntimeError("Transcript fallback returned no usable segments")
+            raise YoutubeTranscriptUnavailableError(
+                "This YouTube video could not be ingested from Render because transcript access is blocked or unavailable. "
+                "Please upload the video file directly or use a normal watch URL with captions/transcript enabled."
+            )
 
         segments: list[dict[str, Any]] = []
         for row in transcript_entries:
@@ -247,7 +231,9 @@ class VideoIngestionService:
             })
 
         if not segments:
-            raise RuntimeError("Transcript fallback returned no usable segments")
+            raise YoutubeTranscriptUnavailableError(
+                "This YouTube video returned no usable transcript segments. Please upload the video file directly."
+            )
 
         return segments
 
