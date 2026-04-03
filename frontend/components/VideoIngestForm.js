@@ -1,0 +1,74 @@
+import { useState } from "react";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
+
+export default function VideoIngestForm({ onIngested }) {
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [title, setTitle] = useState("");
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(e) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const formData = new FormData();
+      if (youtubeUrl) formData.append("youtube_url", youtubeUrl);
+      if (title) formData.append("title", title);
+      if (file) formData.append("file", file);
+
+      const res = await fetch(`${API_BASE}/videos/ingest`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      onIngested(data.video);
+    } catch (err) {
+      setError(err.message || "Failed to ingest video");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form className="card" onSubmit={submit}>
+      <div className="sectionHeader">
+        <h3>1) Ingest Lecture</h3>
+        <span className="muted">YouTube URL or local upload</span>
+      </div>
+
+      <div className="row">
+        <div className="field" style={{ flex: 1 }}>
+          <label>YouTube URL</label>
+          <input
+            placeholder="https://youtube.com/..."
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+          />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Title (optional)</label>
+          <input
+            placeholder="ML Lecture #4"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="field" style={{ marginTop: 12 }}>
+        <label>Upload file (optional)</label>
+        <input type="file" accept="video/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <button disabled={loading}>{loading ? "Processing..." : "Ingest + Generate Summary"}</button>
+      </div>
+      {error ? <p style={{ color: "#ff8f8f" }}>{error}</p> : null}
+    </form>
+  );
+}

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+.pytest_cache/
+
+# Artifacts
+backend/db/artifacts/
+backend/db/chroma/
+backend/db/videos_metadata.json
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# Env
+.env
+backend/.env
+frontend/.env.local
+
+# macOS
+.DS_Store
+
+# Local screenshots
+Screenshot*.png
