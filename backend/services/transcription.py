@@ -166,15 +166,6 @@ class VideoIngestionService:
                 "youtube-transcript-api is not installed. Add it to backend/requirements.txt"
             ) from exc
 
-        transcript_entries: Any = None
-
-        # Compatibility across youtube-transcript-api versions.
-        api_instance: Any = None
-        try:
-            api_instance = YouTubeTranscriptApi()
-        except Exception:
-            api_instance = None
-
         def _normalize_transcript_payload(payload: Any) -> list[dict[str, Any]]:
             if payload is None:
                 return []
@@ -192,50 +183,37 @@ class VideoIngestionService:
                 return [row for row in payload if isinstance(row, dict)]
             return []
 
-        def _try_fetch(target: Any) -> list[dict[str, Any]]:
-            if target is None:
-                return []
-            for kwargs in (
-                {"languages": ["en"]},
-                {},
-            ):
-                for method_name in ("fetch", "get_transcript"):
-                    if not hasattr(target, method_name):
-                        continue
-                    try:
-                        result = getattr(target, method_name)(video_id, **kwargs)
-                    except TypeError:
-                        try:
-                            result = getattr(target, method_name)(video_id)
-                        except Exception:
-                            continue
-                    except Exception:
-                        continue
+        transcript_entries: list[dict[str, Any]] = []
 
-                    normalized = _normalize_transcript_payload(result)
-                    if normalized:
-                        return normalized
-            return []
+        # 1) Primary path: direct transcript fetch using the installed library.
+        try:
+            api_instance = YouTubeTranscriptApi()
+            for languages in (["en"], ["en-US"], ["en-GB"], []):
+                try:
+                    if languages:
+                        result = api_instance.fetch(video_id, languages=languages)
+                    else:
+                        result = api_instance.fetch(video_id)
+                    transcript_entries = _normalize_transcript_payload(result)
+                    if transcript_entries:
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            transcript_entries = []
 
-        # Direct transcript fetch attempts.
-        for target in (YouTubeTranscriptApi, api_instance):
-            transcript_entries = _try_fetch(target)
-            if transcript_entries:
-                break
-
-        # CLI fallback as final fallback, because it avoids API-version differences.
+        # 2) Fallback: CLI invocation with correct argument ordering.
         if not transcript_entries:
             try:
                 cmd = [
                     sys.executable,
                     "-m",
                     "youtube_transcript_api",
-                    "--format",
-                    "json",
+                    video_id,
                     "--languages",
                     "en",
-                    "--",
-                    video_id,
+                    "--format",
+                    "json",
                 ]
                 proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
                 if proc.returncode == 0 and proc.stdout.strip():
@@ -246,6 +224,9 @@ class VideoIngestionService:
                     raise RuntimeError(stderr[:600] or "youtube_transcript_api CLI returned no output")
             except Exception as exc:
                 raise RuntimeError(f"Transcript fallback failed: {exc}") from exc
+
+        if not transcript_entries:
+            raise RuntimeError("Transcript fallback returned no usable segments")
 
         segments: list[dict[str, Any]] = []
         for row in transcript_entries:
