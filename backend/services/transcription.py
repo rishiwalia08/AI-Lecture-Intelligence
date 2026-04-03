@@ -5,6 +5,7 @@ import sys
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from config import settings
 
@@ -38,39 +39,109 @@ class VideoIngestionService:
     def download_youtube_video(self, url: str, out_dir: Path) -> Path:
         out_dir.mkdir(parents=True, exist_ok=True)
         out_tmpl = str(out_dir / "source.%(ext)s")
+        normalized_url = self._normalize_youtube_url(url)
 
-        # Prefer Python API to avoid PATH issues for yt-dlp binary.
-        try:
-            import yt_dlp
+        # Try multiple profiles to handle Shorts/format quirks on hosted environments.
+        profile_errors: list[str] = []
 
-            ydl_opts = {
+        ydl_profiles = [
+            {
+                "format": "best[ext=mp4]/best",
+                "noplaylist": True,
+                "outtmpl": out_tmpl,
+                "quiet": True,
+                "no_warnings": True,
+            },
+            {
                 "format": "mp4/best",
                 "noplaylist": True,
                 "outtmpl": out_tmpl,
                 "quiet": True,
                 "no_warnings": True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-        except Exception:
+            },
+            {
+                "format": "bestaudio/best",
+                "noplaylist": True,
+                "outtmpl": out_tmpl,
+                "quiet": True,
+                "no_warnings": True,
+            },
+        ]
+
+        # Prefer Python API to avoid PATH issues for yt-dlp binary.
+        try:
+            import yt_dlp
+
+            for idx, ydl_opts in enumerate(ydl_profiles):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([normalized_url])
+                    break
+                except Exception as exc:
+                    profile_errors.append(f"profile_{idx + 1}_python_api: {exc}")
+            else:
+                raise RuntimeError(" | ".join(profile_errors))
+        except Exception as exc:
             # Fallback: run module directly with the active Python executable.
-            cmd = [
-                sys.executable,
-                "-m",
-                "yt_dlp",
-                "-f",
-                "mp4/best",
-                "--no-playlist",
-                "-o",
-                out_tmpl,
-                url,
-            ]
-            subprocess.run(cmd, check=True)
+            last_stderr = ""
+            cli_formats = ["best[ext=mp4]/best", "mp4/best", "bestaudio/best"]
+            for fmt in cli_formats:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "yt_dlp",
+                    "-f",
+                    fmt,
+                    "--no-playlist",
+                    "-o",
+                    out_tmpl,
+                    normalized_url,
+                ]
+                proc = subprocess.run(cmd, capture_output=True, text=True)
+                if proc.returncode == 0:
+                    last_stderr = ""
+                    break
+                last_stderr = (proc.stderr or proc.stdout or "").strip()
+            if last_stderr:
+                raise RuntimeError(
+                    "yt-dlp failed for this URL. "
+                    f"Original URL: {url} | Normalized URL: {normalized_url} | "
+                    f"Error: {last_stderr[:500]}"
+                ) from exc
+            raise
 
         files = sorted(out_dir.glob("source.*"))
         if not files:
             raise RuntimeError("Failed to download YouTube video")
         return files[0]
+
+    def _normalize_youtube_url(self, url: str) -> str:
+        try:
+            parsed = urlparse(url)
+            host = (parsed.netloc or "").lower()
+            path = parsed.path or ""
+
+            # Convert shorts URL to watch URL for more stable extraction.
+            if "youtube.com" in host and path.startswith("/shorts/"):
+                video_id = path.split("/shorts/")[-1].split("/")[0].split("?")[0]
+                if video_id:
+                    return f"https://www.youtube.com/watch?v={video_id}"
+
+            # Convert youtu.be short link to watch URL.
+            if "youtu.be" in host:
+                video_id = path.strip("/").split("/")[0]
+                if video_id:
+                    return f"https://www.youtube.com/watch?v={video_id}"
+
+            # Preserve normal watch URL if present.
+            if "youtube.com" in host:
+                query = parse_qs(parsed.query)
+                video_id = (query.get("v") or [""])[0]
+                if video_id:
+                    return f"https://www.youtube.com/watch?v={video_id}"
+        except Exception:
+            pass
+        return url
 
     def extract_audio(self, video_path: Path, out_dir: Path) -> Path:
         out_dir.mkdir(parents=True, exist_ok=True)
