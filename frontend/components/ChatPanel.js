@@ -1,7 +1,7 @@
 import { useState } from "react";
 import TimestampLinks from "./TimestampLinks";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
+const API_BASE = typeof window !== "undefined" ? `${window.location.origin}/api/v1` : "/api/v1";
 
 export default function ChatPanel({ video }) {
   const [mode, setMode] = useState("qa");

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
+const API_BASE = typeof window !== "undefined" ? `${window.location.origin}/api/v1` : "/api/v1";
 
 export default function FlashcardsPanel({ video }) {
   const [flashcards, setFlashcards] = useState([]);

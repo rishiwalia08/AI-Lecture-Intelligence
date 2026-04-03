@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), { ssr: false });
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
+const API_BASE = typeof window !== "undefined" ? `${window.location.origin}/api/v1` : "/api/v1";
 
 export default function KnowledgeGraphPanel({ video }) {
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
