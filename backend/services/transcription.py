@@ -5,6 +5,7 @@ import sys
 import subprocess
 from pathlib import Path
 from typing import Any
+import json
 from urllib.parse import parse_qs, urlparse
 
 from config import settings
@@ -174,81 +175,75 @@ class VideoIngestionService:
         except Exception:
             api_instance = None
 
-        def _try_call(target: Any, method_name: str, *args: Any, **kwargs: Any) -> Any:
-            if target is None or not hasattr(target, method_name):
-                return None
-            method = getattr(target, method_name)
-            try:
-                return method(*args, **kwargs)
-            except TypeError:
-                # Some versions don't accept keyword args like languages.
+        def _normalize_transcript_payload(payload: Any) -> list[dict[str, Any]]:
+            if payload is None:
+                return []
+            if hasattr(payload, "to_raw_data"):
                 try:
-                    return method(*args)
-                except Exception:
-                    return None
-            except Exception:
-                return None
-
-        # Direct transcript fetch attempts.
-        for target, method_name in [
-            (YouTubeTranscriptApi, "get_transcript"),
-            (YouTubeTranscriptApi, "fetch"),
-            (api_instance, "fetch"),
-        ]:
-            result = _try_call(target, method_name, video_id, languages=["en"])
-            if result is None:
-                continue
-            if hasattr(result, "to_raw_data"):
-                try:
-                    result = result.to_raw_data()
+                    payload = payload.to_raw_data()
                 except Exception:
                     pass
-            transcript_entries = result
-            break
+            if isinstance(payload, dict):
+                if isinstance(payload.get("transcript"), list):
+                    payload = payload.get("transcript")
+                elif isinstance(payload.get("snippets"), list):
+                    payload = payload.get("snippets")
+            if isinstance(payload, list):
+                return [row for row in payload if isinstance(row, dict)]
+            return []
 
-        # Fallback to transcript listing and manual/asr selection.
-        if transcript_entries is None:
-            try:
-                transcript_list = (
-                    _try_call(YouTubeTranscriptApi, "list_transcripts", video_id)
-                    or _try_call(api_instance, "list_transcripts", video_id)
-                    or _try_call(api_instance, "list", video_id)
-                )
-                if transcript_list is None:
-                    raise RuntimeError("Transcript listing API unavailable in this youtube-transcript-api version")
-                selected = None
-                for code in ["en", "en-US", "en-GB"]:
+        def _try_fetch(target: Any) -> list[dict[str, Any]]:
+            if target is None:
+                return []
+            for kwargs in (
+                {"languages": ["en"]},
+                {},
+            ):
+                for method_name in ("fetch", "get_transcript"):
+                    if not hasattr(target, method_name):
+                        continue
                     try:
-                        if hasattr(transcript_list, "find_transcript"):
-                            selected = transcript_list.find_transcript([code])
-                        break
+                        result = getattr(target, method_name)(video_id, **kwargs)
+                    except TypeError:
+                        try:
+                            result = getattr(target, method_name)(video_id)
+                        except Exception:
+                            continue
                     except Exception:
                         continue
 
-                if selected is None:
-                    try:
-                        if hasattr(transcript_list, "find_manually_created_transcript"):
-                            selected = transcript_list.find_manually_created_transcript(["en"])
-                    except Exception:
-                        selected = None
+                    normalized = _normalize_transcript_payload(result)
+                    if normalized:
+                        return normalized
+            return []
 
-                if selected is None:
-                    try:
-                        if hasattr(transcript_list, "find_generated_transcript"):
-                            selected = transcript_list.find_generated_transcript(["en"])
-                    except Exception:
-                        selected = None
+        # Direct transcript fetch attempts.
+        for target in (YouTubeTranscriptApi, api_instance):
+            transcript_entries = _try_fetch(target)
+            if transcript_entries:
+                break
 
-                if selected is None:
-                    raise RuntimeError("No English transcript available")
-
-                fetched = selected.fetch() if hasattr(selected, "fetch") else selected
-                if hasattr(fetched, "to_raw_data"):
-                    try:
-                        fetched = fetched.to_raw_data()
-                    except Exception:
-                        pass
-                transcript_entries = fetched
+        # CLI fallback as final fallback, because it avoids API-version differences.
+        if not transcript_entries:
+            try:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "youtube_transcript_api",
+                    "--format",
+                    "json",
+                    "--languages",
+                    "en",
+                    "--",
+                    video_id,
+                ]
+                proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                if proc.returncode == 0 and proc.stdout.strip():
+                    parsed = json.loads(proc.stdout)
+                    transcript_entries = _normalize_transcript_payload(parsed)
+                else:
+                    stderr = (proc.stderr or proc.stdout or "").strip()
+                    raise RuntimeError(stderr[:600] or "youtube_transcript_api CLI returned no output")
             except Exception as exc:
                 raise RuntimeError(f"Transcript fallback failed: {exc}") from exc
 
