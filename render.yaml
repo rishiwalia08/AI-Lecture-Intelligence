@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ai-lecture-intelligence-backend
+    name: ai-lecture-intelligence
     env: python
     plan: free
     rootDir: .
@@ -10,14 +10,3 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-
-  - type: web
-    name: ai-lecture-intelligence-frontend
-    env: node
-    plan: free
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    startCommand: npm run start -- -p $PORT
-    envVars:
-      - key: NEXT_PUBLIC_API_BASE
-        value: https://ai-lecture-intelligence-backend.onrender.com/api/v1
