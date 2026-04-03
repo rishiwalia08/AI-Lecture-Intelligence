@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 import tempfile
 from pathlib import Path
@@ -13,10 +14,35 @@ from services.rag import RAGService
 
 router = APIRouter()
 
-pipeline = LecturePipeline()
+logger = logging.getLogger(__name__)
+
 metadata_repo = MetadataRepository()
 artifact_repo = ArtifactRepository()
-rag_service = RAGService(pipeline.llm_service, pipeline.vector_store)
+
+pipeline: LecturePipeline | None = None
+rag_service: RAGService | None = None
+
+
+def get_pipeline() -> LecturePipeline:
+    global pipeline
+    if pipeline is None:
+        try:
+            pipeline = LecturePipeline()
+        except Exception as exc:
+            logger.exception("Failed to initialize lecture pipeline")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Pipeline initialization failed: {exc}",
+            ) from exc
+    return pipeline
+
+
+def get_rag_service() -> RAGService:
+    global rag_service
+    if rag_service is None:
+        p = get_pipeline()
+        rag_service = RAGService(p.llm_service, p.vector_store)
+    return rag_service
 
 
 @router.get("/videos")
@@ -42,8 +68,10 @@ async def ingest_video(
         raise HTTPException(status_code=400, detail="Provide either youtube_url or file")
 
     try:
+        p = get_pipeline()
+
         if youtube_url:
-            payload = pipeline.ingest_from_youtube(youtube_url=youtube_url, title=title)
+            payload = p.ingest_from_youtube(youtube_url=youtube_url, title=title)
             return {"message": "Video ingested successfully", "video": payload}
 
         suffix = Path(file.filename or "lecture.mp4").suffix or ".mp4"
@@ -51,7 +79,7 @@ async def ingest_video(
             tmp.write(await file.read())
             tmp_path = Path(tmp.name)
 
-        payload = pipeline.ingest_from_upload(tmp_path, file.filename or "uploaded_video")
+        payload = p.ingest_from_upload(tmp_path, file.filename or "uploaded_video")
         tmp_path.unlink(missing_ok=True)
         return {"message": "Video uploaded and ingested successfully", "video": payload}
 
@@ -95,7 +123,7 @@ def ask_question(video_id: str, request: QARequest) -> QAResponse:
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    response = rag_service.answer_question(video, request.question)
+    response = get_rag_service().answer_question(video, request.question)
     return QAResponse(**response)
 
 
@@ -105,7 +133,7 @@ def topic_search(video_id: str, request: SearchRequest) -> TopicSearchResponse:
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    response = rag_service.topic_search(video, request.query)
+    response = get_rag_service().topic_search(video, request.query)
     return TopicSearchResponse(**response)
 
 
