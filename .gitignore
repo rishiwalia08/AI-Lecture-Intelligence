@@ -1,21 +1,27 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*.so
+.venv/
+venv/
+.pytest_cache/
+
+# Artifacts
+backend/db/artifacts/
+backend/db/chroma/
+backend/db/videos_metadata.json
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# Env
 .env
-.env.*
-*.log
+backend/.env
+frontend/.env.local
 
-vector_db/
-data/
-models/
-
+# macOS
 .DS_Store
-.vscode/
-.idea/
 
-*.mp4
-*.wav
-*.json
-!frontend/package.json
-!frontend/package-lock.json
+# Local screenshots
+Screenshot*.png

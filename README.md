@@ -1,403 +1,257 @@
-# AI Lecture Intelligence
+# Lecture Intelligence System
 
-### Speech-to-RAG Lecture Search System
+Production-ready AI system to ingest lecture videos (YouTube or uploaded), transcribe, chunk, index, summarize, and answer grounded questions with exact timestamps.
 
-AI Lecture Intelligence is an AI-powered system that allows students to search lecture recordings using natural language or voice and instantly locate the exact moment where a concept is explained.
+## What this build includes
 
-The platform combines **Speech Recognition, Retrieval Augmented Generation (RAG), Vector Databases, and Knowledge Graphs** to build an interactive AI assistant for educational content.
-
----
-
-# Overview
-
-Students often spend hours rewatching lectures to find a specific explanation.
-This system solves that problem by enabling **semantic search across lecture recordings**.
-
-Example query:
-
-> “What is gradient descent?”
-
-The system retrieves:
-
-* the most relevant lecture segment
-* an AI-generated explanation
-* the exact lecture timestamp
+- ✅ Video ingestion from YouTube URL or local upload
+- ✅ Audio extraction via `ffmpeg`
+- ✅ ASR transcription via `faster-whisper`
+- ✅ Transcript cleaning + time-aware chunking
+- ✅ Embeddings + vector DB (`ChromaDB`)
+- ✅ RAG Q&A over transcript chunks
+- ✅ Topic semantic search
+- ✅ Timestamp-aware responses + clickable YouTube deep links
+- ✅ Smart summary: TL;DR, detailed notes, key points, topic breakdown
+- ✅ Minimal clean Next.js interface
 
 ---
 
-# Key Features
+## Architecture
 
-• Speech-based lecture search
-• Timestamp-level lecture retrieval
-• Retrieval Augmented Generation (RAG) answers
-• Hybrid semantic + keyword search
-• Concept knowledge graph visualization
-• Automatic flashcard generation
-• Lecture summarization for revision
-• Modular AI pipeline architecture
-
----
-
-# System Architecture
-
-```
-Lecture Audio
-      ↓
-Speech Recognition (Whisper)
-      ↓
-Timestamped Transcripts
-      ↓
-Chunking & Embeddings (BGE-M3)
-      ↓
-Vector Database (ChromaDB)
-      ↓
-Hybrid Retrieval + Reranking
-      ↓
-LLM Answer Generation (Llama 3)
-      ↓
-Interactive Interface (React Dashboard)
-```
-
-Additional modules:
-
-```
-Concept Knowledge Graph
-Flashcard Generation
-Lecture Summarization
+```text
+Video URL / Upload
+    ↓
+Video Ingestion (yt-dlp / upload)
+    ↓
+Audio Extraction (ffmpeg)
+    ↓
+ASR (faster-whisper)
+    ↓
+Cleaned Timestamped Segments
+    ↓
+Semantic Chunking (time + length boundaries)
+    ↓
+Embeddings (Sentence Transformers or OpenAI)
+    ↓
+ChromaDB per-video index
+    ↓
+RAG QA + Topic Search + Summarization
+    ↓
+Frontend with clickable timestamps
 ```
 
 ---
 
-# Technology Stack
+## Folder structure
 
-## Machine Learning
+```text
+backend/
+  api/
+    routes.py
+    schemas.py
+  services/
+    transcription.py
+    embeddings.py
+    rag.py
+    summarizer.py
+    llm.py
+    pipeline.py
+  db/
+    repository.py
+  utils/
+    time_utils.py
+    video_utils.py
+  main.py
+  config.py
+  requirements.txt
 
-* Whisper (Speech Recognition)
-* Llama 3 (LLM)
-* BGE-M3 (Embeddings)
-* BGE Reranker
+frontend/
+  components/
+  pages/
+  styles/
+  package.json
 
-## Backend
-
-* Python
-* FastAPI
-
-## Retrieval
-
-* ChromaDB
-* BM25
-* LangChain
-
-## NLP
-
-* spaCy
-* NetworkX
-
-## Frontend
-
-* React + Vite
-* TailwindCSS + Framer Motion
-* D3.js + Recharts
-
----
-
-# Project Structure
-
-```
-speech_rag/
-│
-├── config/
-│   └── config.yaml
-│
-├── data/
-│   ├── raw_audio/
-│   ├── processed_audio/
-│   ├── transcripts/
-│   ├── segments/
-│   ├── pdfs/
-│   └── dataset_metadata.csv
-│
-├── datasets/
-│   ├── tedlium/
-│   ├── librispeech/
-│   └── commonvoice_indian/
-│
-├── src/
-│   ├── asr/
-│   ├── data_ingestion/
-│   ├── audio_processing/
-│   ├── anonymization/
-│   ├── embedding/
-│   ├── retrieval/
-│   ├── llm/
-│   ├── knowledge_graph/
-│   └── education/
-│
-├── scripts/
-│   ├── run_phase1_pipeline.py
-│   ├── run_phase2_asr.py
-│   ├── run_phase3_indexing.py
-│   ├── generate_flashcards.py
-│   ├── generate_summaries.py
-│   └── build_concept_graph.py
-│
-├── frontend/
-│   ├── package.json
-│   ├── vite.config.js
-│   └── src/
-│
-├── backend/
-│
-├── tests/
-│
-├── logs/
-│
-├── requirements.txt
-└── README.md
+README.md
 ```
 
 ---
 
-# Installation
+## Backend setup (FastAPI)
 
-Clone the repository
+### 1) Prerequisites
 
+- Python 3.10+
+- `ffmpeg` installed and available in PATH
+- (for YouTube ingestion) `yt-dlp` available (installed via pip in requirements)
+
+Install ffmpeg on macOS:
+
+```bash
+brew install ffmpeg
 ```
-git clone https://github.com/yourusername/AI-Lecture-Intelligence.git
-cd AI-Lecture-Intelligence
-```
 
-Install dependencies
+### 2) Install dependencies
 
-```
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
-Install spaCy models
+### 3) Run API
 
-```
-python -m spacy download en_core_web_sm
-python -m spacy download en_core_web_trf
-```
-
----
-
-# Running the System
-
-### Phase 1 — Data Preparation
-
-```
-python scripts/run_phase1_pipeline.py
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-This step:
+Health check:
 
-* loads dataset metadata
-* normalizes audio to **16 kHz mono WAV**
-* validates dataset structure
-
----
-
-### Phase 2 — Whisper Transcription
-
-```
-python scripts/run_phase2_asr.py
-```
-
-This step:
-
-* transcribes audio
-* produces timestamped segments
-* saves transcripts as JSON
-
-Example output:
-
-```
-data/transcripts/lecture_01_transcript.json
+```bash
+curl http://localhost:8000/health
 ```
 
 ---
 
-### Phase 3 — Vector Indexing
+## Frontend setup (Next.js)
 
-```
-python scripts/run_phase3_indexing.py
-```
-
-This step:
-
-* chunks transcripts
-* generates embeddings
-* stores vectors in ChromaDB
-
----
-
-### Launch the Interface
-
-Start backend:
-
-```
-uvicorn backend.app.main:app --reload
-```
-
-Run React frontend:
-
-```
+```bash
 cd frontend
+cp .env.local.example .env.local
 npm install
 npm run dev
 ```
 
-Set frontend API URL in `frontend/.env` if needed:
+Open: `http://localhost:3000`
 
+---
+
+## API Endpoints
+
+### Ingest (YouTube or upload)
+`POST /api/v1/videos/ingest`
+
+- Form fields:
+  - `youtube_url` (optional)
+  - `title` (optional)
+  - `file` (optional video file)
+- Provide either `youtube_url` or `file`
+
+### List videos
+`GET /api/v1/videos`
+
+### Get video details
+`GET /api/v1/videos/{video_id}`
+
+### Get summary
+`GET /api/v1/videos/{video_id}/summary`
+
+### Get transcript chunks
+`GET /api/v1/videos/{video_id}/transcript`
+
+### Ask question (RAG)
+`POST /api/v1/videos/{video_id}/qa`
+
+```json
+{
+  "question": "Explain overfitting from this lecture"
+}
 ```
-VITE_API_BASE_URL=http://localhost:8000
+
+Response includes:
+- `answer`
+- `references[]` with `start_time`, `end_time`, human-readable timestamp, and `youtube_link` (if source is YouTube)
+
+### Semantic topic search
+`POST /api/v1/videos/{video_id}/search`
+
+```json
+{
+  "query": "gradient descent"
+}
 ```
 
 ---
 
-# Example Query
+## Example output shape (QA)
 
-Input:
-
-```
-What is backpropagation?
-```
-
-Output:
-
-```
-Answer:
-Backpropagation is a training algorithm used in neural networks
-to update weights using gradient descent.
-
-Source:
-Lecture 7 — Timestamp 14:02
-```
-
----
-
-# Flashcard Generation
-
-Generate study flashcards from lecture transcripts.
-
-```
-python scripts/generate_flashcards.py
-```
-
-Example flashcard:
-
-```
-Q: What is gradient descent?
-
-A: An optimization algorithm used to minimize loss during training.
-```
-
-Export formats:
-
-* JSON
-* CSV
-* Anki
-
----
-
-# Concept Knowledge Graph
-
-Build concept relationships across lectures.
-
-```
-python scripts/build_concept_graph.py
-```
-
-This produces:
-
-```
-data/knowledge_graph/concept_graph.graphml
-frontend/concept_graph.html
-```
-
-Example concept graph:
-
-```
-Neural Networks
-   |
-   |--- Backpropagation
-   |--- Gradient Descent
-   |--- Activation Functions
+```json
+{
+  "answer": "Overfitting occurs when the model memorizes training examples...",
+  "references": [
+    {
+      "chunk_id": "chunk_14",
+      "text": "...",
+      "start_time": 754.2,
+      "end_time": 850.0,
+      "timestamp": "12:34 - 14:10",
+      "youtube_link": "https://youtube.com/watch?v=VIDEO_ID&t=754"
+    }
+  ]
+}
 ```
 
 ---
 
-# Running Tests
+## Design decisions (step-by-step)
 
-Run the full test suite:
+1. **Time-first transcript representation**
+   - Every chunk stores `start_time` and `end_time`.
+   - Enables direct timestamp navigation and YouTube deep links.
 
-```
-pytest tests/ -v
-```
+2. **Chunking for long videos**
+   - Chunk boundaries combine pause-based splitting and max character threshold.
+   - This improves retrieval relevance and keeps context windows stable.
 
-With coverage:
+3. **RAG grounding**
+   - Answers are generated from retrieved transcript chunks only.
+   - Responses always include references with timestamps.
 
-```
-pytest tests/ --cov=src
-```
+4. **Model flexibility**
+   - Embeddings backend can be switched:
+     - `sentence-transformers` (default, local)
+     - `openai` (higher quality if API key is provided)
 
----
-
-# Logs & Metrics
-
-```
-logs/pipeline.log
-logs/asr_pipeline.log
-logs/asr_metrics.csv
-```
-
-Metrics tracked:
-
-* transcription time
-* audio duration
-* realtime factor
-* segment counts
+5. **Production-leaning persistence**
+   - ChromaDB persisted to disk.
+   - Metadata + artifacts saved under backend `db/`.
 
 ---
 
-# Roadmap
+## Advanced features status
 
-Phase 1 — Data ingestion & preprocessing
-Phase 2 — Whisper transcription
-Phase 3 — Vector indexing
-Phase 4 — Hybrid retrieval
-Phase 5 — RAG answer generation
-Phase 6 — Concept knowledge graph
-Phase 7 — Flashcard generation
-Phase 8 — Lecture summarization
-
----
-
-# Future Improvements
-
-• Voice-to-voice AI tutor
-• Lecture timeline generation
-• Multi-course search
-• Slide extraction from videos
-• Personalized study recommendations
+- ✅ Multi-video architecture (each video has dedicated collection + metadata)
+- ✅ Topic segmentation (time-aware chunking)
+- ✅ YouTube timestamp deep links
+- ✅ Grounded QA citations
+- ⏳ Per-video chat history persistence (easy next step)
+- ⏳ Bookmarks/notes API (easy next step)
+- ⏳ Exact sentence highlighting in transcript viewer
 
 ---
 
-# Documentation Note
+## Production notes
 
-All previous phase-wise markdown guides/checklists were consolidated into this single README.
-
----
-
-# Author
-
-**Rishi Walia**
-B.Tech CSE (AI & ML)
-VIT Chennai
+- For heavy workloads, move ingestion into background workers (Celery/RQ).
+- Use GPU Whisper for faster transcription.
+- Add auth + rate limits for public deployment.
+- Add caching and batched retrieval for long multi-hour videos.
+- Use a managed vector store (Pinecone/Weaviate) for scale.
 
 ---
 
-# License
+## Quick smoke test
 
-MIT License
+1. Start backend and frontend.
+2. Ingest a YouTube lecture URL.
+3. Ask: *"Explain gradient descent from this lecture"*.
+4. Verify returned timestamps and clickable links.
+5. Search topic and verify top chunks/time ranges.
+
+---
+
+## License
+
+MIT
