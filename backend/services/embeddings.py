@@ -2,28 +2,28 @@ from __future__ import annotations
 
 from typing import Any
 
-import chromadb
-from openai import OpenAI
-from sentence_transformers import SentenceTransformer
-
 from config import settings
 
 
 class EmbeddingService:
     def __init__(self) -> None:
         self.backend = settings.embed_backend
-        self._sentence_model: SentenceTransformer | None = None
-        self._openai_client: OpenAI | None = None
+        self._sentence_model: Any | None = None
+        self._openai_client: Any | None = None
 
-    def _get_sentence_model(self) -> SentenceTransformer:
+    def _get_sentence_model(self) -> Any:
         if self._sentence_model is None:
+            from sentence_transformers import SentenceTransformer
+
             self._sentence_model = SentenceTransformer(settings.sentence_transformer_model)
         return self._sentence_model
 
-    def _get_openai_client(self) -> OpenAI:
+    def _get_openai_client(self) -> Any:
         if not settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required for OpenAI embeddings backend")
         if self._openai_client is None:
+            from openai import OpenAI
+
             self._openai_client = OpenAI(api_key=settings.openai_api_key)
         return self._openai_client
 
@@ -43,6 +43,8 @@ class EmbeddingService:
 
 class VectorStoreService:
     def __init__(self, embedding_service: EmbeddingService) -> None:
+        import chromadb
+
         chroma_path = settings.data_dir / settings.chroma_dir_name
         chroma_path.mkdir(parents=True, exist_ok=True)
 

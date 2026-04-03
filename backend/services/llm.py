@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from openai import OpenAI
-from transformers import pipeline
 
 from config import settings
 
@@ -14,6 +13,8 @@ class LLMService:
 
     def _get_hf_pipe(self):
         if self._hf_pipe is None:
+            from transformers import pipeline
+
             preferred_task = getattr(settings, "hf_task", "text-generation")
             tried: list[str] = []
             for task_name in [preferred_task, "text-generation", "text2text-generation"]:

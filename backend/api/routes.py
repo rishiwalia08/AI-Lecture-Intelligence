@@ -9,8 +9,6 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from api.schemas import QARequest, QAResponse, SearchRequest, TopicSearchResponse
 from db.repository import ArtifactRepository, MetadataRepository
-from services.pipeline import LecturePipeline
-from services.rag import RAGService
 
 router = APIRouter()
 
@@ -19,14 +17,16 @@ logger = logging.getLogger(__name__)
 metadata_repo = MetadataRepository()
 artifact_repo = ArtifactRepository()
 
-pipeline: LecturePipeline | None = None
-rag_service: RAGService | None = None
+pipeline = None
+rag_service = None
 
 
-def get_pipeline() -> LecturePipeline:
+def get_pipeline():
     global pipeline
     if pipeline is None:
         try:
+            from services.pipeline import LecturePipeline
+
             pipeline = LecturePipeline()
         except Exception as exc:
             logger.exception("Failed to initialize lecture pipeline")
@@ -37,10 +37,12 @@ def get_pipeline() -> LecturePipeline:
     return pipeline
 
 
-def get_rag_service() -> RAGService:
+def get_rag_service():
     global rag_service
     if rag_service is None:
         p = get_pipeline()
+        from services.rag import RAGService
+
         rag_service = RAGService(p.llm_service, p.vector_store)
     return rag_service
 
