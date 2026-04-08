@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = typeof window !== "undefined" ? `${window.location.origin}/api/v1` : "/api/v1";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api/v1";
 
 function toClock(seconds) {
   const s = Math.max(0, Math.floor(seconds || 0));

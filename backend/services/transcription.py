@@ -208,8 +208,8 @@ class VideoIngestionService:
 
         if not transcript_entries:
             raise YoutubeTranscriptUnavailableError(
-                "This YouTube video could not be ingested from Render because transcript access is blocked or unavailable. "
-                "Please upload the video file directly or use a normal watch URL with captions/transcript enabled."
+                "This YouTube video transcript is blocked or unavailable. "
+                "Try a normal watch URL with captions enabled, or upload the video file directly."
             )
 
         segments: list[dict[str, Any]] = []

@@ -9,7 +9,7 @@ import FlashcardsPanel from "../components/FlashcardsPanel";
 import AboutPanel from "../components/AboutPanel";
 import SystemStatusPanel from "../components/SystemStatusPanel";
 
-const API_BASE = typeof window !== "undefined" ? `${window.location.origin}/api/v1` : "/api/v1";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api/v1";
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("AI Chat");

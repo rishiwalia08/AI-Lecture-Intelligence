@@ -8,7 +8,7 @@ from db.repository import ArtifactRepository, MetadataRepository
 from services.embeddings import EmbeddingService, VectorStoreService
 from services.llm import LLMService
 from services.summarizer import SummarizerService
-from services.transcription import VideoIngestionService
+from services.transcription import VideoIngestionService, YoutubeTranscriptUnavailableError
 from services.graph_builder import GraphBuilderService
 from services.flashcard_builder import FlashcardBuilderService
 
@@ -30,9 +30,14 @@ class LecturePipeline:
         video_id = str(uuid4())
         work_dir = self.artifact_repo.video_dir(video_id)
 
-        # On hosted Render environments, YouTube download is frequently blocked.
-        # Prefer direct transcript ingestion to keep the web service reliable.
-        segments = self.ingestor.fetch_youtube_transcript(youtube_url)
+        # Prefer transcript API when available, but fall back to local
+        # download + Whisper transcription when transcripts are unavailable.
+        try:
+            segments = self.ingestor.fetch_youtube_transcript(youtube_url)
+        except YoutubeTranscriptUnavailableError:
+            video_path = self.ingestor.download_youtube_video(youtube_url, work_dir)
+            audio_path = self.ingestor.extract_audio(video_path, work_dir)
+            segments = self.ingestor.transcribe_audio(audio_path)
 
         chunks = self.ingestor.chunk_transcript(segments)
 
