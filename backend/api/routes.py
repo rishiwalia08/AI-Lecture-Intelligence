@@ -7,7 +7,15 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from api.schemas import QARequest, QAResponse, SearchRequest, TopicSearchResponse
+from api.schemas import (
+    FlashcardsResponse,
+    GraphResponse,
+    QARequest,
+    QAResponse,
+    SearchRequest,
+    SummaryResponse,
+    TopicSearchResponse,
+)
 from db.repository import ArtifactRepository, MetadataRepository
 from services.transcription import YoutubeTranscriptUnavailableError
 
@@ -94,8 +102,8 @@ async def ingest_video(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/videos/{video_id}/summary")
-def get_summary(video_id: str) -> dict:
+@router.get("/videos/{video_id}/summary", response_model=SummaryResponse)
+def get_summary(video_id: str) -> SummaryResponse:
     video = metadata_repo.get_video(video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -105,7 +113,7 @@ def get_summary(video_id: str) -> dict:
     except FileNotFoundError:
         summary = video.get("summary", {})
 
-    return {"video_id": video_id, "summary": summary}
+    return SummaryResponse(**summary)
 
 
 @router.get("/videos/{video_id}/transcript")
@@ -142,8 +150,8 @@ def topic_search(video_id: str, request: SearchRequest) -> TopicSearchResponse:
     return TopicSearchResponse(**response)
 
 
-@router.get("/videos/{video_id}/graph")
-def get_graph(video_id: str) -> dict:
+@router.get("/videos/{video_id}/graph", response_model=GraphResponse)
+def get_graph(video_id: str) -> GraphResponse:
     video = metadata_repo.get_video(video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -153,11 +161,11 @@ def get_graph(video_id: str) -> dict:
     except FileNotFoundError:
         graph = {"nodes": [], "links": []}
 
-    return {"video_id": video_id, "graph": graph}
+    return GraphResponse(**graph)
 
 
-@router.get("/videos/{video_id}/flashcards")
-def get_flashcards(video_id: str) -> dict:
+@router.get("/videos/{video_id}/flashcards", response_model=FlashcardsResponse)
+def get_flashcards(video_id: str) -> FlashcardsResponse:
     video = metadata_repo.get_video(video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -167,4 +175,4 @@ def get_flashcards(video_id: str) -> dict:
     except FileNotFoundError:
         flashcards = []
 
-    return {"video_id": video_id, "flashcards": flashcards}
+    return FlashcardsResponse(video_id=video_id, flashcards=flashcards)

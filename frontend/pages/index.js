@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Head from "next/head";
 import VideoIngestForm from "../components/VideoIngestForm";
 import SummaryPanel from "../components/SummaryPanel";
@@ -30,7 +30,7 @@ export default function Dashboard() {
 
   async function handleIngested(v) {
     setVideo(v);
-    setSummary(null);
+    setSummary(v?.summary || null);
     setSummaryError("");
     setSummaryLoading(true);
 
@@ -38,13 +38,43 @@ export default function Dashboard() {
       const res = await fetch(`${API_BASE}/videos/${v.video_id}/summary`);
       if (!res.ok) throw new Error("Failed to load summary");
       const data = await res.json();
-      setSummary(data.summary);
+      setSummary(data?.summary || data || null);
     } catch (err) {
       setSummaryError(err.message || "Failed to load summary");
+      if (!summary && v?.summary) {
+        setSummary(v.summary);
+      }
     } finally {
       setSummaryLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!video?.video_id || summary) return;
+
+    let cancelled = false;
+
+    async function loadSummaryForActiveVideo() {
+      setSummaryLoading(true);
+      setSummaryError("");
+      try {
+        const res = await fetch(`${API_BASE}/videos/${video.video_id}/summary`);
+        if (!res.ok) throw new Error("Failed to load summary");
+        const data = await res.json();
+        if (!cancelled) setSummary(data?.summary || data || null);
+      } catch (err) {
+        if (!cancelled) setSummaryError(err.message || "Failed to load summary");
+      } finally {
+        if (!cancelled) setSummaryLoading(false);
+      }
+    }
+
+    loadSummaryForActiveVideo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [video?.video_id, summary]);
 
   const renderActiveTab = () => {
     switch (activeTab) {

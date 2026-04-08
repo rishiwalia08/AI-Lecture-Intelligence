@@ -255,7 +255,17 @@ class VideoIngestionService:
         return audio_path
 
     def transcribe_audio(self, audio_path: Path) -> list[dict[str, Any]]:
-        segments, _ = self.whisper_model.transcribe(str(audio_path), vad_filter=True)
+        kwargs: dict[str, Any] = {
+            "vad_filter": True,
+            "beam_size": 5,
+            "best_of": 5,
+            "condition_on_previous_text": False,
+            "task": "transcribe",
+        }
+        if settings.whisper_language:
+            kwargs["language"] = settings.whisper_language
+
+        segments, _ = self.whisper_model.transcribe(str(audio_path), **kwargs)
         return [
             {
                 "start": float(seg.start),

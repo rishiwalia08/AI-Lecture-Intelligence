@@ -14,12 +14,13 @@ class Settings(BaseSettings):
     openai_chat_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
 
-    llm_backend: str = "huggingface"  # huggingface | openai | none
+    llm_backend: str = "none"  # huggingface | openai | none
     hf_task: str = "text-generation"
     hf_chat_model: str = "distilgpt2"
 
     whisper_model_size: str = "base"
     whisper_compute_type: str = "int8"
+    whisper_language: str | None = None
 
     embed_backend: str = "sentence-transformers"  # sentence-transformers | openai
     sentence_transformer_model: str = "sentence-transformers/all-MiniLM-L6-v2"

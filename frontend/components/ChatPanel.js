@@ -15,8 +15,13 @@ export default function ChatPanel({ video }) {
   const [topicLoading, setTopicLoading] = useState(false);
 
   async function ask() {
-    if (!question.trim()) return;
-    const userQ = question;
+    const userQ = question.trim();
+    if (!userQ) return;
+    if (userQ.length < 3) {
+      setMessages((m) => [...m, { role: "user", text: userQ }, { role: "assistant", text: "Please ask a slightly longer question (at least 3 characters).", refs: [] }]);
+      setQuestion("");
+      return;
+    }
     setQuestion("");
     setMessages((m) => [...m, { role: "user", text: userQ }]);
     setQaLoading(true);
@@ -28,7 +33,21 @@ export default function ChatPanel({ video }) {
         body: JSON.stringify({ question: userQ }),
       });
       const data = await res.json();
-      setMessages((m) => [...m, { role: "assistant", text: data.answer, refs: data.references || [] }]);
+      if (!res.ok) {
+        const msg = data?.detail || "Request failed";
+        setMessages((m) => [...m, { role: "assistant", text: String(msg), refs: [] }]);
+        return;
+      }
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          text: data.answer,
+          refs: data.references || [],
+          answerType: data.answer_type || "grounded",
+          confidence: typeof data.confidence === "number" ? data.confidence : null,
+        },
+      ]);
     } catch {
       setMessages((m) => [...m, { role: "assistant", text: "Request failed", refs: [] }]);
     } finally {
@@ -75,6 +94,12 @@ export default function ChatPanel({ video }) {
             {messages.map((m, idx) => (
               <div key={idx} className={`msg ${m.role === "user" ? "user" : "assistant"}`}>
                 <div><strong>{m.role === "user" ? "You" : "Assistant"}:</strong> {m.text}</div>
+                {m.role === "assistant" ? (
+                  <div className="muted" style={{ fontSize: "0.85rem", marginTop: 4 }}>
+                    Type: {m.answerType || "grounded"}
+                    {typeof m.confidence === "number" ? ` · Confidence: ${Math.round(m.confidence * 100)}%` : ""}
+                  </div>
+                ) : null}
                 {m.role === "assistant" ? <TimestampLinks refs={m.refs} /> : null}
               </div>
             ))}

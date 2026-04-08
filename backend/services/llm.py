@@ -38,7 +38,9 @@ class LLMService:
         if self.backend == "openai":
             return self.client is not None
         if self.backend == "huggingface":
-            return True
+            # Avoid multi-minute cold-start model downloads during ingestion.
+            # Keep local ingestion deterministic and fast by using fallback logic.
+            return False
         return False
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.1) -> str:
@@ -58,9 +60,10 @@ class LLMService:
 
         if self.backend == "huggingface":
             prompt = (
-                f"System instruction:\n{system_prompt}\n\n"
-                f"User request:\n{user_prompt}\n\n"
-                "Return a concise grounded answer."
+                f"Instruction: {system_prompt}\n"
+                "Answer only from the provided context. If uncertain, say so clearly. "
+                "Respond in the same language as the user's question when possible.\n\n"
+                f"{user_prompt}"
             )
             hf = self._get_hf_pipe()
             output = hf(
@@ -70,7 +73,19 @@ class LLMService:
                 temperature=max(0.01, float(temperature)),
             )
             if output and isinstance(output, list):
-                return output[0].get("generated_text", "")
+                text = (output[0].get("generated_text", "") or "").strip()
+                if text.startswith(prompt):
+                    text = text[len(prompt):].strip()
+                if "System instruction:" in text or "User request:" in text:
+                    lines = [
+                        ln.strip()
+                        for ln in text.splitlines()
+                        if ln.strip()
+                        and not ln.strip().startswith("System instruction:")
+                        and not ln.strip().startswith("User request:")
+                    ]
+                    text = "\n".join(lines).strip()
+                return text
             return ""
 
         raise RuntimeError("LLM backend disabled. Set LLM_BACKEND to huggingface or openai.")

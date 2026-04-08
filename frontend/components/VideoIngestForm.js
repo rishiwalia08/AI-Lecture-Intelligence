@@ -13,8 +13,13 @@ export default function VideoIngestForm({ onIngested }) {
     e.preventDefault();
     setError("");
     setLoading(true);
+    const controller = new AbortController();
+    let timeoutId;
 
     try {
+      const timeoutMs = 120000;
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
       const formData = new FormData();
       if (youtubeUrl) formData.append("youtube_url", youtubeUrl);
       if (title) formData.append("title", title);
@@ -23,13 +28,19 @@ export default function VideoIngestForm({ onIngested }) {
       const res = await fetch(`${API_BASE}/videos/ingest`, {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       onIngested(data.video);
     } catch (err) {
-      setError(err.message || "Failed to ingest video");
+      if (err?.name === "AbortError") {
+        setError("Ingestion is taking too long (over 2 minutes). Try a shorter video, use a normal watch URL with captions, or upload the video file directly.");
+      } else {
+        setError(err.message || "Failed to ingest video");
+      }
     } finally {
+      if (timeoutId) clearTimeout(timeoutId);
       setLoading(false);
     }
   }
